@@ -117,6 +117,7 @@ class HttpClient:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/150.0.0.0 Safari/537.36"
         )
+        user_agent = user_agent.replace("HeadlessChrome/", "Chrome/")
         is_mobile = "Mobile" in user_agent or "Android" in user_agent
         chrome_match = re.search(r"(?:Chrome|Chromium)/(\d+)", user_agent)
         chrome_version = chrome_match.group(1) if chrome_match else "150"
@@ -131,12 +132,9 @@ class HttpClient:
         impersonate = fingerprint.get("impersonate") or "chrome"
         session = requests.Session(impersonate=impersonate)
         default_headers = {
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'cache-control': 'no-cache',
-            'pragma': 'no-cache',
+            'accept': '*/*',
             "referer": "https://www.avito.ru/",
-            'sec-ch-ua': f'"Not_A Brand";v="99", "Google Chrome";v="{chrome_version}", "Chromium";v="{chrome_version}"',
+            'sec-ch-ua': f'"Not.A/Brand";v="99", "Chromium";v="{chrome_version}"',
             'sec-ch-ua-mobile': '?1' if is_mobile else '?0',
             'sec-ch-ua-platform': f'"{platform}"',
             'user-agent': user_agent,
