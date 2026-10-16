@@ -84,8 +84,9 @@ class HttpClient:
             "AVITO_CHROMIUM_PATH",
             "/ms-playwright/chromium-1169/chrome-linux/chrome",
         )
+        headless = os.getenv("AVITO_HEADLESS", "1").lower() not in {"0", "false", "no"}
         options = {
-            "headless": False,
+            "headless": headless,
             "viewport": None,
             "args": [
                 "--no-sandbox",
