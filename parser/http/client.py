@@ -75,6 +75,22 @@ class HttpClient:
         if use_playwright:
             self._start_playwright()
 
+    def close(self) -> None:
+        if self._context is not None:
+            try:
+                self._context.close()
+            finally:
+                self._context = None
+                self._page = None
+        if self._playwright is not None:
+            try:
+                self._playwright.stop()
+            finally:
+                self._playwright = None
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
     def _start_playwright(self) -> None:
         from playwright.sync_api import sync_playwright
 

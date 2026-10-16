@@ -74,6 +74,9 @@ class AvitoParse:
         log_config(config=self.config, version=VERSION)
 
 
+    def close(self) -> None:
+        self.http.close()
+
     def get_proxy_obj(self) -> Proxy | None:
         if all([self.config.proxy_string, self.config.proxy_change_url]):
             return Proxy(
@@ -500,6 +503,8 @@ if __name__ == "__main__":
         )
 
     while True:
+        parser = None
+        failed = False
         try:
             parser = AvitoParse(config)
             parser.parse()
@@ -507,8 +512,12 @@ if __name__ == "__main__":
                 logger.info("Парсинг завершен т.к. включён one_time_start в настройках")
                 break
             logger.info(f"Парсинг завершен. Пауза {config.pause_general} сек")
-            time.sleep(config.pause_general)
         except Exception as err:
+            failed = True
             logger.exception(err)
             logger.error(f"Произошла ошибка {err}. Будет повторный запуск через 30 сек.")
-            time.sleep(30)
+        finally:
+            if parser is not None:
+                parser.close()
+
+        time.sleep(30 if failed else config.pause_general)
