@@ -46,6 +46,7 @@ class AvitoConfig:
     parse_description: bool = False
     save_xlsx: bool = True
     use_webdriver: bool = True
+    playwright_handoff_to_curl: bool = False
     use_bypass_api: bool = False
     cookies_api_key: str = None
     purchase_cooldown: int = 600

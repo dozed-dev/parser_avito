@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 import httpx
 from loguru import logger
@@ -7,6 +8,7 @@ from playwright_stealth import Stealth
 from typing import Optional, Dict, List
 
 from dto import Proxy, ProxySplit
+from parser.cookies.base import CookiesProvider
 from playwright_setup import ensure_playwright_installed
 
 MAX_RETRIES = 3
@@ -217,3 +219,76 @@ async def get_cookies(proxy: Proxy = None, headless: bool = True, stop_event=Non
     ads_id = str(random.randint(1111111111, 9999999999))
     cookies = await client.get_cookies(f"https://www.avito.ru/{ads_id}")
     return cookies, client.user_agent
+
+
+class ProfileCookiesProvider(CookiesProvider):
+    def __init__(self, cookies: list[dict], user_agent: str):
+        self._cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
+        self._user_agent = user_agent.replace("HeadlessChrome/", "Chrome/")
+
+    def get(self) -> dict[str, str]:
+        return self._cookies.copy()
+
+    def get_user_agent(self) -> str:
+        return self._user_agent
+
+    def get_fingerprint(self) -> dict:
+        return {
+            "impersonate": "chrome",
+            "headers": {"user-agent": self._user_agent},
+        }
+
+    def handle_block(self):
+        logger.warning("Cookies из Chromium profile требуют повторного handoff")
+
+
+def get_profile_cookies(
+    profile_path: str | None = None,
+    headless: bool | None = None,
+    timeout: int = 20,
+    proxy=None,
+) -> ProfileCookiesProvider:
+    from playwright.sync_api import sync_playwright
+
+    if headless is None:
+        headless = os.getenv("AVITO_HEADLESS", "1").lower() not in {"0", "false", "no"}
+    profile_path = profile_path or os.getenv(
+        "AVITO_PROFILE_PATH",
+        "storage/container-chromium-profile",
+    )
+    executable = os.getenv(
+        "AVITO_CHROMIUM_PATH",
+        "/ms-playwright/chromium-1169/chrome-linux/chrome",
+    )
+    options = {
+        "headless": headless,
+        "viewport": None,
+        "args": [
+            "--no-sandbox",
+            "--disable-breakpad",
+            "--disable-crash-reporter",
+            "--crash-dumps-dir=/tmp",
+            "--ozone-platform=wayland",
+        ],
+    }
+    if os.path.exists(executable):
+        options["executable_path"] = executable
+    if proxy:
+        proxy_url = proxy.get_httpx_proxy()
+        if proxy_url:
+            options["proxy"] = {"server": proxy_url}
+
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(profile_path, **options)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(
+                "https://www.avito.ru",
+                wait_until="domcontentloaded",
+                timeout=timeout * 1000,
+            )
+            cookies = context.cookies("https://www.avito.ru")
+            user_agent = page.evaluate("navigator.userAgent")
+            return ProfileCookiesProvider(cookies, user_agent)
+        finally:
+            context.close()

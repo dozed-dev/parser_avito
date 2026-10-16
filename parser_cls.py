@@ -18,6 +18,7 @@ from integrations.notifications.factory import build_notifier
 from load_config import load_avito_config
 from models import ItemsResponse, Item
 from parser.cookies.factory import build_cookies_provider
+from get_cookies import get_profile_cookies
 from parser.export.factory import build_result_storage
 from parser.http.client import HttpClient
 from parser.proxies.proxy_factory import build_proxy
@@ -45,6 +46,13 @@ class AvitoParse:
 
         self.proxy = build_proxy(self.config)
         self.cookies_provider = build_cookies_provider(config=config, proxy=self.proxy)
+        use_playwright = self.config.use_webdriver
+        if self.config.playwright_handoff_to_curl:
+            self.cookies_provider = get_profile_cookies(
+                timeout=config.timeout,
+                proxy=self.proxy,
+            )
+            use_playwright = False
         self.db_handler = SQLiteDBHandler()
         self.notifier = build_notifier(config=config)
         self.result_storage = None
@@ -60,7 +68,7 @@ class AvitoParse:
             max_retries=self.config.max_count_of_retry,
             retry_delay=config.retry_delay,
             block_threshold=config.block_threshold,
-            use_playwright=self.config.use_webdriver,
+            use_playwright=use_playwright,
         )
         self.ads_filter = AdsFilter(config=config, is_viewed_fn=self.is_viewed)
         log_config(config=self.config, version=VERSION)
