@@ -2,10 +2,17 @@ import json
 import time
 from pathlib import Path
 from threading import Lock
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import requests
 from loguru import logger
+
+from parser.search_url_builder import (
+    AvitoSearchUrlBuilder,
+    StructuredSearchRequest,
+    LOCATION_IDS,
+    location_slug_candidates,
+)
 
 
 SPFA_AVITO_URL_ENDPOINT = "https://spfa.pro/api/avito-url/"
@@ -27,55 +34,55 @@ class AvitoUrlConverter:
         self.min_request_interval = min_request_interval
         self.timeout = timeout
         self._cache = self._load_cache()
+        self._search_url_builder = AvitoSearchUrlBuilder()
+        self._resolved_location_ids: dict[str, int] = {}
 
     def convert(self, url: str) -> str:
-        """Convert only supported public URLs without calling SPFA."""
+        """Convert supported public URLs without calling SPFA."""
         cached_url = self._cache.get(url)
         if cached_url:
             logger.debug(f"API URL загружен из кэша: {url}")
             return cached_url
 
-        parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
-        if host not in {"avito.ru", "www.avito.ru"}:
-            raise ValueError("Ссылка должна быть на avito.ru")
-        if "/web/1/js/items" in parts.path:
-            return url
-
-        location_ids = {"rossiya": 621540, "moskva": 637640}
-        path_parts = [part for part in parts.path.split("/") if part]
-        if len(path_parts) != 1 or path_parts[0] not in location_ids:
-            raise ValueError(
-                "Эту ссылку нельзя преобразовать локально; "
-                "используйте structured filters или convert_via_spfa"
-            )
-
-        source_params = dict(parse_qsl(parts.query, keep_blank_values=True))
-        supported_params = {"q", "pmin", "pmax", "cd", "sort"}
-        unsupported = set(source_params) - supported_params
-        if unsupported:
-            raise ValueError(
-                "Локальный converter не поддерживает параметры: "
-                + ", ".join(sorted(unsupported))
-            )
-
-        api_params: list[tuple[str, str | int]] = [
-            ("localPriority", 0),
-            ("locationId", location_ids[path_parts[0]]),
-            ("presentationType", "serp"),
-            ("sort", source_params.get("sort") or "default"),
-        ]
-        if source_params.get("q"):
-            api_params.append(("query", source_params["q"]))
-        for key in ("pmin", "pmax", "cd"):
-            if source_params.get(key):
-                api_params.append((key, source_params[key]))
-
-        api_url = "https://www.avito.ru/web/1/js/items?" + urlencode(api_params)
-        self._cache[url] = api_url
-        self._save_cache()
-        logger.info(f"Ссылка Avito локально преобразована: {url}")
+        api_url = self._search_url_builder.build_public_url(url)
+        if api_url != url:
+            self._cache[url] = api_url
+            self._save_cache()
+            logger.info(f"Ссылка Avito локально преобразована: {url}")
         return api_url
+
+    def build_search_url(
+        self,
+        request: StructuredSearchRequest,
+    ) -> tuple[str, dict[str, object]]:
+        return self._search_url_builder.build(
+            request,
+            location_resolver=self.resolve_location_id,
+        )
+
+    def resolve_location_id(self, location: str) -> int:
+        normalized = location.strip().lower()
+        if normalized in LOCATION_IDS:
+            return LOCATION_IDS[normalized]
+        if normalized in self._resolved_location_ids:
+            return self._resolved_location_ids[normalized]
+
+        last_error: Exception | None = None
+        for slug in location_slug_candidates(location):
+            probe_url = f"https://www.avito.ru/{slug}?q=mcp_location_probe"
+            try:
+                api_url = self.convert_via_spfa(probe_url)
+                params = dict(parse_qsl(urlsplit(api_url).query, keep_blank_values=True))
+                location_id = int(params["locationId"])
+                self._resolved_location_ids[normalized] = location_id
+                return location_id
+            except (KeyError, ValueError, RuntimeError) as error:
+                last_error = error
+
+        detail = f": {last_error}" if last_error else ""
+        raise ValueError(
+            f"Не удалось определить locationId для {location}{detail}"
+        ) from last_error
 
     def convert_via_spfa(self, url: str) -> str:
         cached_url = self._cache.get(url)

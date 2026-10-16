@@ -16,6 +16,7 @@ from get_cookies import get_profile_cookies
 from load_config import load_avito_config
 from parser.http.client import HttpClient
 from parser.proxies.proxy_factory import build_proxy
+from parser.search_url_builder import StructuredSearchRequest
 from parser.url_converter import AvitoUrlConverter
 
 
@@ -105,98 +106,6 @@ def _valid_avito_url(url: str) -> bool:
     )
 
 
-_LOCATION_IDS = {
-    "россия": 621540,
-    "russia": 621540,
-    "ru": 621540,
-    "москва": 637640,
-    "moscow": 637640,
-    "санкт-петербург": 653240,
-    "санкт петербург": 653240,
-    "петербург": 653240,
-    "спб": 653240,
-    "saint petersburg": 653240,
-    "saint-petersburg": 653240,
-    "spb": 653240,
-}
-_SORT_VALUES = {
-    "relevance": "default",
-    "newest": "date",
-    "price_asc": "price",
-    "price_desc": "price_desc",
-}
-
-
-def _resolve_location(location: str, location_id: int | None) -> int:
-    if location_id is not None:
-        if location_id <= 0:
-            raise ValueError("location_id должен быть положительным числом")
-        return location_id
-    normalized = location.strip().lower()
-    try:
-        return _LOCATION_IDS[normalized]
-    except KeyError as error:
-        supported = ", ".join(sorted({"Россия", "Москва", "Санкт-Петербург"}))
-        raise ValueError(
-            f"Неизвестная location: {location}. Поддерживаются: {supported}; "
-            "для другого места укажите location_id"
-        ) from error
-
-
-def _structured_api_url(
-    *,
-    query: str | None,
-    location: str,
-    location_id: int | None,
-    category_id: int | None,
-    price_min: int | None,
-    price_max: int | None,
-    sort: str,
-    with_delivery_only: bool,
-) -> tuple[str, dict[str, Any]]:
-    if sort not in _SORT_VALUES:
-        supported = ", ".join(_SORT_VALUES)
-        raise ValueError(f"sort должен быть одним из: {supported}")
-    if price_min is not None and price_min < 0:
-        raise ValueError("price_min не может быть отрицательным")
-    if price_max is not None and price_max < 0:
-        raise ValueError("price_max не может быть отрицательным")
-    if price_min is not None and price_max is not None and price_min > price_max:
-        raise ValueError("price_min не может быть больше price_max")
-    if category_id is not None and category_id <= 0:
-        raise ValueError("category_id должен быть положительным числом")
-
-    resolved_location_id = _resolve_location(location, location_id)
-    params: list[tuple[str, str | int]] = [
-        ("localPriority", 0),
-        ("locationId", resolved_location_id),
-        ("presentationType", "serp"),
-        ("sort", _SORT_VALUES[sort]),
-    ]
-    if query:
-        params.append(("query", query.strip()))
-    if category_id is not None:
-        params.append(("categoryId", category_id))
-    if price_min is not None:
-        params.append(("pmin", price_min))
-    if price_max is not None:
-        params.append(("pmax", price_max))
-    if with_delivery_only:
-        params.append(("cd", 1))
-
-    api_url = "https://www.avito.ru/web/1/js/items?" + urlencode(params)
-    filters = {
-        "query": query.strip() if query else None,
-        "location": location,
-        "location_id": resolved_location_id,
-        "category_id": category_id,
-        "price_min": price_min,
-        "price_max": price_max,
-        "sort": sort,
-        "with_delivery_only": with_delivery_only,
-    }
-    return api_url, filters
-
 class AvitoMcpService:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -227,12 +136,12 @@ class AvitoMcpService:
             )
             return self._http
 
+
     def search(
         self,
         url: str | None,
         query: str | None,
         location: str,
-        category_id: int | None,
         location_id: int | None,
         price_min: int | None,
         price_max: int | None,
@@ -247,7 +156,6 @@ class AvitoMcpService:
             has_structured_filters = any(
                 (
                     query,
-                    category_id is not None,
                     location_id is not None,
                     location != "Россия",
                     price_min is not None,
@@ -263,16 +171,17 @@ class AvitoMcpService:
             api_url = url if "/web/1/js/items" in url else self._converter.convert(url)
             filters = {"legacy_url": url}
         else:
-            api_url, filters = _structured_api_url(
+            request = StructuredSearchRequest(
                 query=query,
                 location=location,
                 location_id=location_id,
-                category_id=category_id,
                 price_min=price_min,
                 price_max=price_max,
                 sort=sort,
+                page=page,
                 with_delivery_only=with_delivery_only,
             )
+            api_url, filters = self._converter.build_search_url(request)
 
         page_api_url = _api_url_for_page(api_url, page)
         response = self._get_http().request("GET", page_api_url)
@@ -341,7 +250,6 @@ atexit.register(service.close)
 async def search_ads(
     query: Annotated[str | None, "Текст поиска на Avito; можно не указывать для всех объявлений."] = None,
     location: Annotated[str, "Россия, Москва или Санкт-Петербург; по умолчанию Россия."] = "Россия",
-    category_id: Annotated[int | None, "Внутренний Avito categoryId, если он известен."] = None,
     location_id: Annotated[int | None, "Внутренний Avito locationId для другого региона."] = None,
     price_min: Annotated[int | None, "Минимальная цена в рублях."] = None,
     price_max: Annotated[int | None, "Максимальная цена в рублях."] = None,
@@ -359,7 +267,6 @@ async def search_ads(
         url,
         query,
         location,
-        category_id,
         location_id,
         price_min,
         price_max,
