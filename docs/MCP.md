@@ -10,6 +10,18 @@ Run it from the project directory:
 podman compose run --rm -T -e APP_MODE=mcp parser_avito
 ```
 
+## ChatGPT tunnel via Compose
+
+Set the tunnel credentials in the shell or `.env` file:
+
+```bash
+export CONTROL_PLANE_API_KEY=sk-...
+export CONTROL_PLANE_TUNNEL_ID=tunnel_...
+podman compose up -d --build parser_avito mcp_server tunnel-client
+```
+
+`mcp_server` listens on `127.0.0.1:8000/mcp`, and `tunnel-client` forwards that endpoint to the configured OpenAI tunnel. The compose file passes `CONTROL_PLANE_API_KEY`, `CONTROL_PLANE_TUNNEL_ID`, and `MCP_SERVER_URL` to the tunnel client.
+
 - `search_ads(query, location, location_id, price_min, price_max, sort, page, with_delivery_only)` - build a search locally and return listings with image URLs;
 - `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs;
 - `search_ads(url=..., page=...)` remains available for direct API URLs, cached URLs, and simple `/rossiya`, `/moskva`, or `/sankt-peterburg` links.

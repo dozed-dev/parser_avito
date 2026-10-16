@@ -35,3 +35,33 @@ services:
     network_mode: host
     userns_mode: keep-id
     user: "${UID:-1000}:${GID:-1000}"
+
+  mcp_server:
+    container_name: avito_mcp
+    image: localhost/parser_avito:latest
+    restart: always
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./storage:/app/storage:Z
+    environment:
+      APP_MODE: mcp
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 127.0.0.1
+      MCP_PORT: 8000
+    network_mode: host
+    userns_mode: keep-id
+    user: "${UID:-1000}:${GID:-1000}"
+
+  tunnel-client:
+    image: ${TUNNEL_CLIENT_IMAGE:-ghcr.io/openai/tunnel-client:latest}
+    restart: unless-stopped
+    depends_on:
+      - mcp_server
+    environment:
+      CONTROL_PLANE_API_KEY: ${CONTROL_PLANE_API_KEY:?CONTROL_PLANE_API_KEY is required}
+      CONTROL_PLANE_TUNNEL_ID: ${CONTROL_PLANE_TUNNEL_ID:?CONTROL_PLANE_TUNNEL_ID is required}
+      MCP_SERVER_URL: http://127.0.0.1:8000/mcp
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      HEALTH_LISTEN_ADDR: 127.0.0.1:8080
+    network_mode: host
