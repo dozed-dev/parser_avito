@@ -36,8 +36,15 @@ Example client configuration:
 
 MCP always performs the Playwright profile -> curl handoff before the first tool call. Close any other Chromium process using the same profile before starting MCP.
 
-The transport can later be changed without changing the tools:
+The same tools are available over streamable HTTP:
 
 ```bash
-podman compose run --rm -e APP_MODE=mcp -e MCP_TRANSPORT=streamable-http parser_avito
+podman compose run --rm \
+  -e APP_MODE=mcp \
+  -e MCP_TRANSPORT=streamable-http \
+  -e MCP_HOST=0.0.0.0 \
+  -e MCP_PORT=8000 \
+  parser_avito
 ```
+
+The MCP endpoint is `http://127.0.0.1:8000/mcp`. The default port is `8000`; change it with `MCP_PORT`.

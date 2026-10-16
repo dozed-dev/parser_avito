@@ -13,13 +13,15 @@ from mcp.server.fastmcp import FastMCP
 
 from get_cookies import get_profile_cookies
 from load_config import load_avito_config
-from parser.cookies.factory import build_cookies_provider
 from parser.http.client import HttpClient
 from parser.proxies.proxy_factory import build_proxy
 from parser.url_converter import AvitoUrlConverter
 
 
-mcp = FastMCP("Avito read-only")
+MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
+
+mcp = FastMCP("Avito read-only", host=MCP_HOST, port=MCP_PORT)
 
 
 def _api_url_for_page(api_url: str, page: int) -> str:
