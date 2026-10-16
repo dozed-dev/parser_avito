@@ -2,6 +2,7 @@ import json
 import time
 from pathlib import Path
 from threading import Lock
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
 from loguru import logger
@@ -11,7 +12,7 @@ SPFA_AVITO_URL_ENDPOINT = "https://spfa.pro/api/avito-url/"
 
 
 class AvitoUrlConverter:
-    """Convert public Avito URLs to mobile API URLs and cache the result."""
+    """Convert supported public URLs locally; keep SPFA as explicit fallback."""
 
     _request_lock = Lock()
     _last_request_at = 0.0
@@ -28,6 +29,55 @@ class AvitoUrlConverter:
         self._cache = self._load_cache()
 
     def convert(self, url: str) -> str:
+        """Convert only supported public URLs without calling SPFA."""
+        cached_url = self._cache.get(url)
+        if cached_url:
+            logger.debug(f"API URL загружен из кэша: {url}")
+            return cached_url
+
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        if host not in {"avito.ru", "www.avito.ru"}:
+            raise ValueError("Ссылка должна быть на avito.ru")
+        if "/web/1/js/items" in parts.path:
+            return url
+
+        location_ids = {"rossiya": 621540, "moskva": 637640}
+        path_parts = [part for part in parts.path.split("/") if part]
+        if len(path_parts) != 1 or path_parts[0] not in location_ids:
+            raise ValueError(
+                "Эту ссылку нельзя преобразовать локально; "
+                "используйте structured filters или convert_via_spfa"
+            )
+
+        source_params = dict(parse_qsl(parts.query, keep_blank_values=True))
+        supported_params = {"q", "pmin", "pmax", "cd", "sort"}
+        unsupported = set(source_params) - supported_params
+        if unsupported:
+            raise ValueError(
+                "Локальный converter не поддерживает параметры: "
+                + ", ".join(sorted(unsupported))
+            )
+
+        api_params: list[tuple[str, str | int]] = [
+            ("localPriority", 0),
+            ("locationId", location_ids[path_parts[0]]),
+            ("presentationType", "serp"),
+            ("sort", source_params.get("sort") or "default"),
+        ]
+        if source_params.get("q"):
+            api_params.append(("query", source_params["q"]))
+        for key in ("pmin", "pmax", "cd"):
+            if source_params.get(key):
+                api_params.append((key, source_params[key]))
+
+        api_url = "https://www.avito.ru/web/1/js/items?" + urlencode(api_params)
+        self._cache[url] = api_url
+        self._save_cache()
+        logger.info(f"Ссылка Avito локально преобразована: {url}")
+        return api_url
+
+    def convert_via_spfa(self, url: str) -> str:
         cached_url = self._cache.get(url)
         if cached_url:
             logger.debug(f"API URL загружен из кэша: {url}")

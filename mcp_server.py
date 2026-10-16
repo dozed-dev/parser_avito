@@ -6,7 +6,7 @@ import atexit
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from mcp.server.fastmcp import FastMCP
@@ -104,6 +104,91 @@ def _valid_avito_url(url: str) -> bool:
     )
 
 
+_LOCATION_IDS = {
+    "россия": 621540,
+    "russia": 621540,
+    "ru": 621540,
+    "москва": 637640,
+    "moscow": 637640,
+}
+_SORT_VALUES = {
+    "relevance": "default",
+    "newest": "date",
+    "price_asc": "price",
+    "price_desc": "price_desc",
+}
+
+
+def _resolve_location(location: str, location_id: int | None) -> int:
+    if location_id is not None:
+        if location_id <= 0:
+            raise ValueError("location_id должен быть положительным числом")
+        return location_id
+    normalized = location.strip().lower()
+    try:
+        return _LOCATION_IDS[normalized]
+    except KeyError as error:
+        supported = ", ".join(sorted({"Россия", "Москва"}))
+        raise ValueError(
+            f"Неизвестная location: {location}. Поддерживаются: {supported}; "
+            "для другого места укажите location_id"
+        ) from error
+
+
+def _structured_api_url(
+    *,
+    query: str | None,
+    location: str,
+    location_id: int | None,
+    category_id: int | None,
+    price_min: int | None,
+    price_max: int | None,
+    sort: str,
+    with_delivery_only: bool,
+) -> tuple[str, dict[str, Any]]:
+    if sort not in _SORT_VALUES:
+        supported = ", ".join(_SORT_VALUES)
+        raise ValueError(f"sort должен быть одним из: {supported}")
+    if price_min is not None and price_min < 0:
+        raise ValueError("price_min не может быть отрицательным")
+    if price_max is not None and price_max < 0:
+        raise ValueError("price_max не может быть отрицательным")
+    if price_min is not None and price_max is not None and price_min > price_max:
+        raise ValueError("price_min не может быть больше price_max")
+    if category_id is not None and category_id <= 0:
+        raise ValueError("category_id должен быть положительным числом")
+
+    resolved_location_id = _resolve_location(location, location_id)
+    params: list[tuple[str, str | int]] = [
+        ("localPriority", 0),
+        ("locationId", resolved_location_id),
+        ("presentationType", "serp"),
+        ("sort", _SORT_VALUES[sort]),
+    ]
+    if query:
+        params.append(("query", query.strip()))
+    if category_id is not None:
+        params.append(("categoryId", category_id))
+    if price_min is not None:
+        params.append(("pmin", price_min))
+    if price_max is not None:
+        params.append(("pmax", price_max))
+    if with_delivery_only:
+        params.append(("cd", 1))
+
+    api_url = "https://www.avito.ru/web/1/js/items?" + urlencode(params)
+    filters = {
+        "query": query.strip() if query else None,
+        "location": location,
+        "location_id": resolved_location_id,
+        "category_id": category_id,
+        "price_min": price_min,
+        "price_max": price_max,
+        "sort": sort,
+        "with_delivery_only": with_delivery_only,
+    }
+    return api_url, filters
+
 class AvitoMcpService:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -134,23 +219,64 @@ class AvitoMcpService:
             )
             return self._http
 
-    def search(self, url: str, page: int) -> dict[str, Any]:
-        if not _valid_avito_url(url):
-            raise ValueError("url должен быть ссылкой на avito.ru")
+    def search(
+        self,
+        url: str | None,
+        query: str | None,
+        location: str,
+        category_id: int | None,
+        location_id: int | None,
+        price_min: int | None,
+        price_max: int | None,
+        sort: str,
+        page: int,
+        with_delivery_only: bool,
+    ) -> dict[str, Any]:
         if page < 1 or page > 100:
             raise ValueError("page должен быть от 1 до 100")
 
-        api_url = (
-            url
-            if "/web/1/js/items" in url
-            else self._converter.convert(url)
-        )
-        response = self._get_http().request(
-            "GET",
-            _api_url_for_page(api_url, page),
-        )
+        if url:
+            has_structured_filters = any(
+                (
+                    query,
+                    category_id is not None,
+                    location_id is not None,
+                    location != "Россия",
+                    price_min is not None,
+                    price_max is not None,
+                    sort != "relevance",
+                    with_delivery_only,
+                )
+            )
+            if has_structured_filters:
+                raise ValueError("Нельзя одновременно передавать url и structured filters")
+            if not _valid_avito_url(url):
+                raise ValueError("url должен быть ссылкой на avito.ru")
+            api_url = url if "/web/1/js/items" in url else self._converter.convert(url)
+            filters = {"legacy_url": url}
+        else:
+            api_url, filters = _structured_api_url(
+                query=query,
+                location=location,
+                location_id=location_id,
+                category_id=category_id,
+                price_min=price_min,
+                price_max=price_max,
+                sort=sort,
+                with_delivery_only=with_delivery_only,
+            )
+
+        page_api_url = _api_url_for_page(api_url, page)
+        response = self._get_http().request("GET", page_api_url)
         items = [_item_summary(item) for item in _extract_catalog(response.json())]
-        return {"source_url": url, "page": page, "count": len(items), "items": items}
+        return {
+            "source_url": url,
+            "api_url": page_api_url,
+            "filters": filters,
+            "page": page,
+            "count": len(items),
+            "items": items,
+        }
 
     def get_ad(self, item_id: int, include_raw: bool) -> dict[str, Any]:
         if item_id <= 0:
@@ -175,9 +301,34 @@ class AvitoMcpService:
             result["raw"] = payload
         return result
 
-    async def run_search(self, url: str, page: int) -> dict[str, Any]:
+    async def run_search(
+        self,
+        url: str | None,
+        query: str | None,
+        location: str,
+        category_id: int | None,
+        location_id: int | None,
+        price_min: int | None,
+        price_max: int | None,
+        sort: str,
+        page: int,
+        with_delivery_only: bool,
+    ) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, self.search, url, page)
+        return await loop.run_in_executor(
+            self._executor,
+            self.search,
+            url,
+            query,
+            location,
+            category_id,
+            location_id,
+            price_min,
+            price_max,
+            sort,
+            page,
+            with_delivery_only,
+        )
 
     async def run_get_ad(self, item_id: int, include_raw: bool) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
@@ -201,6 +352,9 @@ class AvitoMcpService:
             return
         try:
             executor.submit(self._close_sync).result(timeout=30)
+        except RuntimeError:
+            # Python may already be shutting down the executor at atexit.
+            pass
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
 
@@ -210,9 +364,34 @@ atexit.register(service.close)
 
 
 @mcp.tool()
-async def search_ads(url: str, page: int = 1) -> dict[str, Any]:
-    """Search an Avito public search URL and return listings with image URLs."""
-    return await service.run_search(url, page)
+async def search_ads(
+    query: Annotated[str | None, "Текст поиска на Avito; можно не указывать для всех объявлений."] = None,
+    location: Annotated[str, "Россия или Москва; по умолчанию Россия."] = "Россия",
+    category_id: Annotated[int | None, "Внутренний Avito categoryId, если он известен."] = None,
+    location_id: Annotated[int | None, "Внутренний Avito locationId для другого региона."] = None,
+    price_min: Annotated[int | None, "Минимальная цена в рублях."] = None,
+    price_max: Annotated[int | None, "Максимальная цена в рублях."] = None,
+    sort: Annotated[
+        Literal["relevance", "newest", "price_asc", "price_desc"],
+        "Сортировка результатов.",
+    ] = "relevance",
+    page: Annotated[int, "Номер страницы от 1 до 100."] = 1,
+    with_delivery_only: Annotated[bool, "Только объявления с доставкой."] = False,
+    url: Annotated[str | None, "Legacy: готовая ссылка Avito; не смешивать с фильтрами."] = None,
+) -> dict[str, Any]:
+    """Search Avito with structured filters and return listings with image URLs."""
+    return await service.run_search(
+        url,
+        query,
+        location,
+        category_id,
+        location_id,
+        price_min,
+        price_max,
+        sort,
+        page,
+        with_delivery_only,
+    )
 
 
 @mcp.tool()

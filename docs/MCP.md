@@ -1,6 +1,6 @@
 # MCP server
 
-The project includes a read-only MCP server using stdio transport.
+The project includes a read-only MCP server with stdio and streamable HTTP transports.
 
 ## Run locally
 
@@ -10,12 +10,11 @@ Run it from the project directory:
 podman compose run --rm -T -e APP_MODE=mcp parser_avito
 ```
 
-The server exposes:
+- `search_ads(query, location, category_id, location_id, price_min, price_max, sort, page, with_delivery_only)` - build a search locally and return listings with image URLs;
+- `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs;
+- `search_ads(url=..., page=...)` remains available for direct API URLs, cached URLs, and simple `/rossiya` or `/moskva` links.
 
-- `search_ads(url, page=1)` - search a public Avito URL and return listing data with image URLs;
-- `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs.
-
-`url` must point to `avito.ru`. `page` is limited to 1..100. The server does not add, edit, or delete parser configuration and has no monitoring tools.
+Structured search defaults to Russia. Supported friendly locations are `Россия` and `Москва`; use `location_id` for another region. `sort` accepts `relevance`, `newest`, `price_asc`, and `price_desc`. `page` is limited to 1..100. The server does not add, edit, or delete parser configuration and has no monitoring tools.
 
 ## MCP client command
 

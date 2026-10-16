@@ -158,7 +158,7 @@ class AvitoParse:
             if self.stop_event and self.stop_event.is_set():
                 return
             try:
-                api_urls[source_url] = self.url_converter.convert(source_url)
+                api_urls[source_url] = self.url_converter.convert_via_spfa(source_url)
             except Exception as err:
                 logger.error(
                     f"Не удалось преобразовать ссылку Avito в API URL "

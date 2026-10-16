@@ -4,8 +4,9 @@
 
 ### Неопубликовано
 #### Добавлено
-- Добавлен односторонний handoff из persistent Chromium profile в curl: `playwright_handoff_to_curl = true` получает cookies и User-Agent через Playwright, закрывает браузер и продолжает запросы через curl.
-- По умолчанию handoff выключен; профиль Chromium не должен быть открыт другим процессом во время handoff.
+- Добавлен read-only MCP server с инструментами `search_ads` и `get_ad` через stdio и streamable HTTP.
+- `search_ads` принимает structured filters (`query`, location, price, sort, page, delivery) и локально строит API URL без SPFA для базовых запросов.
+- Старый SPFA converter вынесен в `convert_via_spfa`; обычный parser продолжает использовать его явно.
 
 ### [3.2.23] - 2026-09-30
 #### Добавлено
