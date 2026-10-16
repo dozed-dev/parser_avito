@@ -14,7 +14,7 @@ podman compose run --rm -T -e APP_MODE=mcp parser_avito
 - `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs;
 - `search_ads(url=..., page=...)` remains available for direct API URLs, cached URLs, and simple `/rossiya` or `/moskva` links.
 
-Structured search defaults to Russia. Supported friendly locations are `Россия` and `Москва`; use `location_id` for another region. `sort` accepts `relevance`, `newest`, `price_asc`, and `price_desc`. `page` is limited to 1..100. The server does not add, edit, or delete parser configuration and has no monitoring tools.
+Structured search defaults to Russia. Supported friendly locations are `Россия`, `Москва`, and `Санкт-Петербург`; use `location_id` for another region. `sort` accepts `relevance`, `newest`, `price_asc`, and `price_desc`. `page` is limited to 1..100. The server does not add, edit, or delete parser configuration and has no monitoring tools.
 
 ## MCP client command
 

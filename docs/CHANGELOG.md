@@ -6,6 +6,7 @@
 #### Добавлено
 - Добавлен read-only MCP server с инструментами `search_ads` и `get_ad` через stdio и streamable HTTP.
 - `search_ads` принимает structured filters (`query`, location, price, sort, page, delivery) и локально строит API URL без SPFA для базовых запросов.
+- В structured MCP search добавлена friendly location `Санкт-Петербург` (`locationId=653240`) и aliases `СПб`/`Петербург`.
 - Старый SPFA converter вынесен в `convert_via_spfa`; обычный parser продолжает использовать его явно.
 
 ### [3.2.23] - 2026-09-30

@@ -110,6 +110,13 @@ _LOCATION_IDS = {
     "ru": 621540,
     "москва": 637640,
     "moscow": 637640,
+    "санкт-петербург": 653240,
+    "санкт петербург": 653240,
+    "петербург": 653240,
+    "спб": 653240,
+    "saint petersburg": 653240,
+    "saint-petersburg": 653240,
+    "spb": 653240,
 }
 _SORT_VALUES = {
     "relevance": "default",
@@ -128,7 +135,7 @@ def _resolve_location(location: str, location_id: int | None) -> int:
     try:
         return _LOCATION_IDS[normalized]
     except KeyError as error:
-        supported = ", ".join(sorted({"Россия", "Москва"}))
+        supported = ", ".join(sorted({"Россия", "Москва", "Санкт-Петербург"}))
         raise ValueError(
             f"Неизвестная location: {location}. Поддерживаются: {supported}; "
             "для другого места укажите location_id"
@@ -366,7 +373,7 @@ atexit.register(service.close)
 @mcp.tool()
 async def search_ads(
     query: Annotated[str | None, "Текст поиска на Avito; можно не указывать для всех объявлений."] = None,
-    location: Annotated[str, "Россия или Москва; по умолчанию Россия."] = "Россия",
+    location: Annotated[str, "Россия, Москва или Санкт-Петербург; по умолчанию Россия."] = "Россия",
     category_id: Annotated[int | None, "Внутренний Avito categoryId, если он известен."] = None,
     location_id: Annotated[int | None, "Внутренний Avito locationId для другого региона."] = None,
     price_min: Annotated[int | None, "Минимальная цена в рублях."] = None,
