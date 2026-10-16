@@ -10,7 +10,6 @@ from loguru import logger
 from parser.search_url_builder import (
     AvitoSearchUrlBuilder,
     StructuredSearchRequest,
-    LOCATION_IDS,
     location_slug_candidates,
 )
 
@@ -57,13 +56,11 @@ class AvitoUrlConverter:
     ) -> tuple[str, dict[str, object]]:
         return self._search_url_builder.build(
             request,
-            location_resolver=self.resolve_location_id,
+            location_resolver=self.resolve_unknown_location_id,
         )
 
-    def resolve_location_id(self, location: str) -> int:
+    def resolve_unknown_location_id(self, location: str) -> int:
         normalized = location.strip().lower()
-        if normalized in LOCATION_IDS:
-            return LOCATION_IDS[normalized]
         if normalized in self._resolved_location_ids:
             return self._resolved_location_ids[normalized]
 

@@ -7,25 +7,32 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 
 LOCATION_IDS = {
-    "россия": 621540,
-    "russia": 621540,
-    "ru": 621540,
-    "москва": 637640,
-    "moscow": 637640,
-    "санкт-петербург": 653240,
-    "санкт петербург": 653240,
-    "петербург": 653240,
-    "спб": 653240,
-    "saint petersburg": 653240,
-    "saint-petersburg": 653240,
-    "spb": 653240,
-}
-
-PUBLIC_PATH_LOCATION_IDS = {
     "rossiya": 621540,
     "moskva": 637640,
     "sankt-peterburg": 653240,
 }
+
+LOCATION_ALIASES = {
+    "rossiya": "rossiya",
+    "россия": "rossiya",
+    "russia": "rossiya",
+    "ru": "rossiya",
+    "moskva": "moskva",
+    "москва": "moskva",
+    "moscow": "moskva",
+    "sankt-peterburg": "sankt-peterburg",
+    "санкт-петербург": "sankt-peterburg",
+    "санкт петербург": "sankt-peterburg",
+    "петербург": "sankt-peterburg",
+    "спб": "sankt-peterburg",
+    "saint petersburg": "sankt-peterburg",
+    "saint-petersburg": "sankt-peterburg",
+    "spb": "sankt-peterburg",
+}
+
+
+def canonical_location(location: str) -> str | None:
+    return LOCATION_ALIASES.get(location.strip().lower())
 
 SORT_VALUES = {
     "relevance": "default",
@@ -68,7 +75,7 @@ class AvitoSearchUrlBuilder:
         location_resolver: Callable[[str], int] | None = None,
     ) -> tuple[str, dict[str, object]]:
         self._validate(request)
-        resolved_location_id = self._resolve_location(
+        resolved_location_id = self.resolve_location_id(
             request.location,
             request.location_id,
             location_resolver,
@@ -102,7 +109,7 @@ class AvitoSearchUrlBuilder:
             return url
 
         path_parts = [part for part in parts.path.split("/") if part]
-        if len(path_parts) != 1 or path_parts[0] not in PUBLIC_PATH_LOCATION_IDS:
+        if len(path_parts) != 1 or path_parts[0] not in LOCATION_IDS:
             raise ValueError(
                 "Эту ссылку нельзя преобразовать локально; "
                 "используйте structured search или convert_via_spfa"
@@ -119,7 +126,7 @@ class AvitoSearchUrlBuilder:
 
         api_params: list[tuple[str, str | int]] = [
             ("localPriority", 0),
-            ("locationId", PUBLIC_PATH_LOCATION_IDS[path_parts[0]]),
+            ("locationId", LOCATION_IDS[path_parts[0]]),
             ("presentationType", "serp"),
             ("sort", source_params.get("sort") or "default"),
         ]
@@ -131,7 +138,7 @@ class AvitoSearchUrlBuilder:
         return "https://www.avito.ru/web/1/js/items?" + urlencode(api_params)
 
     @staticmethod
-    def _resolve_location(
+    def resolve_location_id(
         location: str,
         location_id: int | None,
         location_resolver: Callable[[str], int] | None,
@@ -141,9 +148,9 @@ class AvitoSearchUrlBuilder:
                 raise ValueError("location_id должен быть положительным числом")
             return location_id
 
-        normalized = location.strip().lower()
-        if normalized in LOCATION_IDS:
-            return LOCATION_IDS[normalized]
+        canonical = canonical_location(location)
+        if canonical is not None:
+            return LOCATION_IDS[canonical]
         if location_resolver is not None:
             resolved = location_resolver(location)
             if resolved > 0:
