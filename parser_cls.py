@@ -59,7 +59,8 @@ class AvitoParse:
             timeout=config.timeout,
             max_retries=self.config.max_count_of_retry,
             retry_delay=config.retry_delay,
-            block_threshold=config.block_threshold
+            block_threshold=config.block_threshold,
+            use_playwright=self.config.use_webdriver,
         )
         self.ads_filter = AdsFilter(config=config, is_viewed_fn=self.is_viewed)
         log_config(config=self.config, version=VERSION)

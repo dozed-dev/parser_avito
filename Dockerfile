@@ -1,36 +1,18 @@
-FROM python:3.11-slim
+FROM mcr.microsoft.com/playwright:v1.52.0-noble
 LABEL org.opencontainers.image.source=https://github.com/Duff89/parser_avito
 
-RUN apt-get update && apt-get install \
--y --ignore-missing --no-install-recommends --no-install-suggests \
-	libatk-bridge2.0-0t64 \
-	libatk1.0-0t64 \
-	libatspi2.0-0t64 \
-	libcairo2 \
-	libdbus-1-3 \
-	libdrm2 \
-	libgbm1 \
-	libglib2.0-0t64 \
-	libnspr4 \
-	libnss3 \
-	libpango-1.0-0 \
-	libxcomposite1 \
-	libxdamage1 \
-	libxfixes3 \
-	libxrandr2 \
-	libxkbcommon0 \
-	libasound2 \
-	&& apt-get autopurge \
-	&& apt-get clean \
-	&& apt-get distclean
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3-venv \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
 WORKDIR /app
-RUN pip install --upgrade pip && pip install -r requirements.txt
-
-RUN python -m playwright install chromium-headless-shell
+RUN python3 -m venv /opt/avito-venv \
+    && /opt/avito-venv/bin/python -m pip install --upgrade pip \
+    && /opt/avito-venv/bin/python -m pip install -r requirements.txt
 
 COPY . /app
+RUN chown -R 1000:1000 /app /opt/avito-venv
 COPY entrypoint.sh /
-
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+
