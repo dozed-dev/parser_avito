@@ -1,39 +1,26 @@
 """Build Avito API URLs from structured search requests."""
 
+import json
 import re
+import time
 from dataclasses import dataclass
-from typing import Callable
+from pathlib import Path
+from threading import Lock
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
+import requests
+from loguru import logger
 
-LOCATION_IDS = {
-    "rossiya": 621540,
-    "moskva": 637640,
-    "sankt-peterburg": 653240,
+
+SPFA_AVITO_URL_ENDPOINT = "https://spfa.pro/api/avito-url/"
+
+# The key is the exact location name expected from the MCP model. The slug and
+# ID are kept together so public URLs and structured requests share one source.
+LOCAL_LOCATIONS = {
+    "Россия": {"slug": "rossiya", "location_id": 621540},
+    "Москва": {"slug": "moskva", "location_id": 637640},
+    "Санкт-Петербург": {"slug": "sankt-peterburg", "location_id": 653240},
 }
-
-LOCATION_ALIASES = {
-    "rossiya": "rossiya",
-    "россия": "rossiya",
-    "russia": "rossiya",
-    "ru": "rossiya",
-    "moskva": "moskva",
-    "москва": "moskva",
-    "moscow": "moskva",
-    "sankt-peterburg": "sankt-peterburg",
-    "санкт-петербург": "sankt-peterburg",
-    "санкт петербург": "sankt-peterburg",
-    "петербург": "sankt-peterburg",
-    "спб": "sankt-peterburg",
-    "saint petersburg": "sankt-peterburg",
-    "saint-petersburg": "sankt-peterburg",
-    "spb": "sankt-peterburg",
-}
-
-
-def canonical_location(location: str) -> str | None:
-    return LOCATION_ALIASES.get(location.strip().lower())
-
 SORT_VALUES = {
     "relevance": "default",
     "newest": "date",
@@ -66,19 +53,138 @@ class StructuredSearchRequest:
         }
 
 
+class SpfaUrlResolver:
+    """Resolve public Avito URLs through SPFA and persist the result cache."""
+
+    _request_lock = Lock()
+    _last_request_at = 0.0
+
+    def __init__(
+        self,
+        cache_path: str | Path = "storage/avito_api_urls.json",
+        min_request_interval: float = 31.0,
+        timeout: int = 20,
+    ):
+        self.cache_path = Path(cache_path)
+        self.min_request_interval = min_request_interval
+        self.timeout = timeout
+        self._cache = self._load_cache()
+
+    def cached(self, url: str) -> str | None:
+        return self._cache.get(url)
+
+    def store(self, source_url: str, api_url: str) -> None:
+        self._cache[source_url] = api_url
+        self._save_cache()
+
+    def convert(self, url: str) -> str:
+        cached_url = self.cached(url)
+        if cached_url:
+            logger.debug(f"API URL загружен из кэша: {url}")
+            return cached_url
+
+        with self._request_lock:
+            self._cache.update(self._load_cache())
+            cached_url = self.cached(url)
+            if cached_url:
+                return cached_url
+
+            self._wait_for_rate_limit()
+            response = requests.post(
+                SPFA_AVITO_URL_ENDPOINT,
+                json={"url": url},
+                headers={"Content-Type": "application/json"},
+                timeout=self.timeout,
+            )
+            type(self)._last_request_at = time.monotonic()
+
+            if response.status_code != 200:
+                raise RuntimeError(self._format_error(response))
+
+            try:
+                payload = response.json()
+            except ValueError as error:
+                raise RuntimeError(
+                    "SPFA вернул некорректный JSON при преобразовании URL"
+                ) from error
+
+            api_url = payload.get("api_url")
+            if not payload.get("success") or not api_url:
+                raise RuntimeError("SPFA не вернул api_url для ссылки Avito")
+
+            self.store(url, api_url)
+            logger.info(f"Ссылка Avito преобразована в API URL: {url}")
+            return api_url
+
+    def _wait_for_rate_limit(self) -> None:
+        elapsed = time.monotonic() - type(self)._last_request_at
+        delay = self.min_request_interval - elapsed
+        if type(self)._last_request_at and delay > 0:
+            logger.info(
+                f"Ожидание {delay:.1f} сек. перед следующим запросом к SPFA"
+            )
+            time.sleep(delay)
+
+    @staticmethod
+    def _format_error(response) -> str:
+        messages = {
+            400: "SPFA отклонил ссылку: некорректный JSON или URL не относится к Avito",
+            429: "Превышен лимит SPFA: не более 2 преобразований URL в минуту",
+            502: "SPFA не смог получить URI от Avito",
+            503: "У SPFA серверная ошибка",
+        }
+        return messages.get(
+            response.status_code,
+            f"SPFA вернул неожиданный HTTP-код {response.status_code}",
+        )
+
+    def _load_cache(self) -> dict[str, str]:
+        if not self.cache_path.exists():
+            return {}
+
+        try:
+            data = json.loads(self.cache_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("cache root must be an object")
+            return {
+                str(source_url): str(api_url)
+                for source_url, api_url in data.items()
+                if source_url and api_url
+            }
+        except (OSError, ValueError, TypeError) as error:
+            logger.warning(f"Не удалось загрузить кэш API URL: {error}")
+            return {}
+
+    def _save_cache(self) -> None:
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
+        temp_path.write_text(
+            json.dumps(self._cache, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(self.cache_path)
+
+
 class AvitoSearchUrlBuilder:
-    """Build API URLs and resolve unknown locations through an injected resolver."""
+    """Build API URLs and resolve unknown locations through SPFA."""
+
+    def __init__(
+        self,
+        cache_path: str | Path = "storage/avito_api_urls.json",
+        min_request_interval: float = 31.0,
+        timeout: int = 20,
+    ):
+        self._spfa = SpfaUrlResolver(cache_path, min_request_interval, timeout)
+        self._resolved_location_ids: dict[str, int] = {}
 
     def build(
         self,
         request: StructuredSearchRequest,
-        location_resolver: Callable[[str], int] | None = None,
     ) -> tuple[str, dict[str, object]]:
         self._validate(request)
         resolved_location_id = self.resolve_location_id(
             request.location,
             request.location_id,
-            location_resolver,
         )
         params: list[tuple[str, str | int]] = [
             ("localPriority", 0),
@@ -99,8 +205,13 @@ class AvitoSearchUrlBuilder:
         api_url = "https://www.avito.ru/web/1/js/items?" + urlencode(params)
         return api_url, request.filters(resolved_location_id)
 
-    def build_public_url(self, url: str) -> str:
-        """Build simple public search URLs without calling an external resolver."""
+    def convert_public_url(self, url: str) -> str:
+        """Build simple public search URLs without calling SPFA."""
+        cached_url = self._spfa.cached(url)
+        if cached_url:
+            logger.debug(f"API URL загружен из кэша: {url}")
+            return cached_url
+
         parts = urlsplit(url)
         host = (parts.hostname or "").lower()
         if host not in {"avito.ru", "www.avito.ru"}:
@@ -109,7 +220,15 @@ class AvitoSearchUrlBuilder:
             return url
 
         path_parts = [part for part in parts.path.split("/") if part]
-        if len(path_parts) != 1 or path_parts[0] not in LOCATION_IDS:
+        local_location = next(
+            (
+                location
+                for location in LOCAL_LOCATIONS.values()
+                if location["slug"] == (path_parts[0] if len(path_parts) == 1 else "")
+            ),
+            None,
+        )
+        if local_location is None:
             raise ValueError(
                 "Эту ссылку нельзя преобразовать локально; "
                 "используйте structured search или convert_via_spfa"
@@ -126,7 +245,7 @@ class AvitoSearchUrlBuilder:
 
         api_params: list[tuple[str, str | int]] = [
             ("localPriority", 0),
-            ("locationId", LOCATION_IDS[path_parts[0]]),
+            ("locationId", local_location["location_id"]),
             ("presentationType", "serp"),
             ("sort", source_params.get("sort") or "default"),
         ]
@@ -135,30 +254,47 @@ class AvitoSearchUrlBuilder:
         for key in ("pmin", "pmax", "cd"):
             if source_params.get(key):
                 api_params.append((key, source_params[key]))
-        return "https://www.avito.ru/web/1/js/items?" + urlencode(api_params)
 
-    @staticmethod
-    def resolve_location_id(
-        location: str,
-        location_id: int | None,
-        location_resolver: Callable[[str], int] | None,
-    ) -> int:
+        api_url = "https://www.avito.ru/web/1/js/items?" + urlencode(api_params)
+        self._spfa.store(url, api_url)
+        logger.info(f"Ссылка Avito локально преобразована: {url}")
+        return api_url
+
+    def convert_via_spfa(self, url: str) -> str:
+        return self._spfa.convert(url)
+
+    def resolve_location_id(self, location: str, location_id: int | None = None) -> int:
         if location_id is not None:
             if location_id <= 0:
                 raise ValueError("location_id должен быть положительным числом")
             return location_id
 
-        canonical = canonical_location(location)
-        if canonical is not None:
-            return LOCATION_IDS[canonical]
-        if location_resolver is not None:
-            resolved = location_resolver(location)
-            if resolved > 0:
-                return resolved
-        supported = ", ".join(sorted({"Россия", "Москва", "Санкт-Петербург"}))
-        raise ValueError(
-            f"Неизвестная location: {location}. Поддерживаются: {supported}; "
-            "для другого места укажите location_id"
+        location_name = location.strip()
+        local_location = LOCAL_LOCATIONS.get(location_name)
+        if local_location is not None:
+            return local_location["location_id"]
+        if location_name in self._resolved_location_ids:
+            return self._resolved_location_ids[location_name]
+        slug = avito_location_slug(location_name)
+        if not slug:
+            raise self._unknown_location_error(location)
+
+        probe_url = f"https://www.avito.ru/{slug}?q=mcp_location_probe"
+        try:
+            api_url = self.convert_via_spfa(probe_url)
+            params = dict(parse_qsl(urlsplit(api_url).query, keep_blank_values=True))
+            resolved_location_id = int(params["locationId"])
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise self._unknown_location_error(location) from error
+
+        self._resolved_location_ids[location_name] = resolved_location_id
+        return resolved_location_id
+
+    @staticmethod
+    def _unknown_location_error(location: str) -> ValueError:
+        return ValueError(
+            f"Город или регион не найден: «{location}». "
+            "Возможно, в названии опечатка? Укажите полное название."
         )
 
     @staticmethod
@@ -180,8 +316,8 @@ class AvitoSearchUrlBuilder:
             raise ValueError("price_min не может быть больше price_max")
 
 
-def location_slug_candidates(location: str) -> list[str]:
-    """Return common Avito path spellings for a human-readable location."""
+def avito_location_slug(location: str) -> str:
+    """Transliterate a full Russian city or region name to an Avito slug."""
     transliteration = str.maketrans({
         "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e",
         "ё": "e", "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k",
@@ -191,8 +327,6 @@ def location_slug_candidates(location: str) -> list[str]:
         "э": "e", "ю": "yu", "я": "ya",
     })
     slug = location.strip().lower().translate(transliteration)
-    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
-    candidates = [slug]
-    if "-" in slug:
-        candidates.append(slug.replace("-", "_"))
-    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+    slug = re.sub(r"[^a-z0-9-]+", "_", slug)
+    slug = re.sub(r"_+", "_", slug).strip("_-")
+    return slug

@@ -14,7 +14,7 @@ podman compose run --rm -T -e APP_MODE=mcp parser_avito
 - `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs;
 - `search_ads(url=..., page=...)` remains available for direct API URLs, cached URLs, and simple `/rossiya`, `/moskva`, or `/sankt-peterburg` links.
 
-Structured search defaults to Russia. Supported friendly locations are `Россия`, `Москва`, and `Санкт-Петербург`; unknown locations are resolved through the shared converter and SPFA, then cached. Use `location_id` to avoid resolution when the Avito ID is known. `sort` accepts `relevance`, `newest`, `price_asc`, and `price_desc`. `page` is limited to 1..100. Categories are not exposed yet. The server does not add, edit, or delete parser configuration and has no monitoring tools.
+Structured search defaults to `Россия`. `location` must be the exact full Russian city or region name: the local list contains `Россия`, `Москва`, and `Санкт-Петербург`; aliases such as `СПб` are not supported. Other full names are transliterated using Avito-style slugs (`Нижний Новгород` -> `nizhniy_novgorod`, `Свердловская область` -> `sverdlovskaya_oblast`) and resolved through SPFA, then cached. If the city or region cannot be resolved, the tool returns `Город или регион не найден ... Возможно, в названии опечатка?`. Use `location_id` to skip resolution when the Avito ID is known. `sort` accepts `relevance`, `newest`, `price_asc`, and `price_desc`. `page` is limited to 1..100. Categories are not exposed yet. The server does not add, edit, or delete parser configuration and has no monitoring tools.
 
 ## MCP client command
 

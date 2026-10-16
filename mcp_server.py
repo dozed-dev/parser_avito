@@ -249,7 +249,7 @@ atexit.register(service.close)
 @mcp.tool()
 async def search_ads(
     query: Annotated[str | None, "Текст поиска на Avito; можно не указывать для всех объявлений."] = None,
-    location: Annotated[str, "Россия, Москва или Санкт-Петербург; по умолчанию Россия."] = "Россия",
+    location: Annotated[str, "Полное название города или региона; локально: Россия, Москва, Санкт-Петербург; aliases не использовать."] = "Россия",
     location_id: Annotated[int | None, "Внутренний Avito locationId для другого региона."] = None,
     price_min: Annotated[int | None, "Минимальная цена в рублях."] = None,
     price_max: Annotated[int | None, "Максимальная цена в рублях."] = None,

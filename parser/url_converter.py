@@ -1,27 +1,10 @@
-import json
-import time
 from pathlib import Path
-from threading import Lock
-from urllib.parse import parse_qsl, urlsplit
 
-import requests
-from loguru import logger
-
-from parser.search_url_builder import (
-    AvitoSearchUrlBuilder,
-    StructuredSearchRequest,
-    location_slug_candidates,
-)
-
-
-SPFA_AVITO_URL_ENDPOINT = "https://spfa.pro/api/avito-url/"
+from parser.search_url_builder import AvitoSearchUrlBuilder, StructuredSearchRequest
 
 
 class AvitoUrlConverter:
-    """Convert supported public URLs locally; keep SPFA as explicit fallback."""
-
-    _request_lock = Lock()
-    _last_request_at = 0.0
+    """Facade over the shared public URL and structured search builder."""
 
     def __init__(
         self,
@@ -29,147 +12,22 @@ class AvitoUrlConverter:
         min_request_interval: float = 31.0,
         timeout: int = 20,
     ):
-        self.cache_path = Path(cache_path)
-        self.min_request_interval = min_request_interval
-        self.timeout = timeout
-        self._cache = self._load_cache()
-        self._search_url_builder = AvitoSearchUrlBuilder()
-        self._resolved_location_ids: dict[str, int] = {}
+        self._builder = AvitoSearchUrlBuilder(
+            cache_path=cache_path,
+            min_request_interval=min_request_interval,
+            timeout=timeout,
+        )
 
     def convert(self, url: str) -> str:
-        """Convert supported public URLs without calling SPFA."""
-        cached_url = self._cache.get(url)
-        if cached_url:
-            logger.debug(f"API URL загружен из кэша: {url}")
-            return cached_url
-
-        api_url = self._search_url_builder.build_public_url(url)
-        if api_url != url:
-            self._cache[url] = api_url
-            self._save_cache()
-            logger.info(f"Ссылка Avito локально преобразована: {url}")
-        return api_url
+        """Convert supported public URLs locally without calling SPFA."""
+        return self._builder.convert_public_url(url)
 
     def build_search_url(
         self,
         request: StructuredSearchRequest,
     ) -> tuple[str, dict[str, object]]:
-        return self._search_url_builder.build(
-            request,
-            location_resolver=self.resolve_unknown_location_id,
-        )
-
-    def resolve_unknown_location_id(self, location: str) -> int:
-        normalized = location.strip().lower()
-        if normalized in self._resolved_location_ids:
-            return self._resolved_location_ids[normalized]
-
-        last_error: Exception | None = None
-        for slug in location_slug_candidates(location):
-            probe_url = f"https://www.avito.ru/{slug}?q=mcp_location_probe"
-            try:
-                api_url = self.convert_via_spfa(probe_url)
-                params = dict(parse_qsl(urlsplit(api_url).query, keep_blank_values=True))
-                location_id = int(params["locationId"])
-                self._resolved_location_ids[normalized] = location_id
-                return location_id
-            except (KeyError, ValueError, RuntimeError) as error:
-                last_error = error
-
-        detail = f": {last_error}" if last_error else ""
-        raise ValueError(
-            f"Не удалось определить locationId для {location}{detail}"
-        ) from last_error
+        return self._builder.build(request)
 
     def convert_via_spfa(self, url: str) -> str:
-        cached_url = self._cache.get(url)
-        if cached_url:
-            logger.debug(f"API URL загружен из кэша: {url}")
-            return cached_url
-
-        with self._request_lock:
-            # Another converter in this process may have populated the file
-            # while this instance was waiting for the rate-limit lock.
-            self._cache.update(self._load_cache())
-            cached_url = self._cache.get(url)
-            if cached_url:
-                return cached_url
-
-            self._wait_for_rate_limit()
-            response = requests.post(
-                SPFA_AVITO_URL_ENDPOINT,
-                json={"url": url},
-                headers={"Content-Type": "application/json"},
-                timeout=self.timeout,
-            )
-            type(self)._last_request_at = time.monotonic()
-
-            if response.status_code != 200:
-                raise RuntimeError(self._format_error(response))
-
-            try:
-                payload = response.json()
-            except ValueError as error:
-                raise RuntimeError(
-                    "SPFA вернул некорректный JSON при преобразовании URL"
-                ) from error
-
-            api_url = payload.get("api_url")
-            if not payload.get("success") or not api_url:
-                raise RuntimeError(
-                    "SPFA не вернул api_url для ссылки Avito"
-                )
-
-            self._cache[url] = api_url
-            self._save_cache()
-            logger.info(f"Ссылка Avito преобразована в API URL: {url}")
-            return api_url
-
-    def _wait_for_rate_limit(self) -> None:
-        elapsed = time.monotonic() - type(self)._last_request_at
-        delay = self.min_request_interval - elapsed
-        if type(self)._last_request_at and delay > 0:
-            logger.info(
-                f"Ожидание {delay:.1f} сек. перед следующим запросом к SPFA"
-            )
-            time.sleep(delay)
-
-    @staticmethod
-    def _format_error(response) -> str:
-        messages = {
-            400: "SPFA отклонил ссылку: некорректный JSON или URL не относится к Avito",
-            429: "Превышен лимит SPFA: не более 2 преобразований URL в минуту",
-            502: "SPFA не смог получить URI от Avito",
-            503: "У SPFA серверная ошибка",
-        }
-        message = messages.get(
-            response.status_code,
-            f"SPFA вернул неожиданный HTTP-код {response.status_code}",
-        )
-        return message
-
-    def _load_cache(self) -> dict[str, str]:
-        if not self.cache_path.exists():
-            return {}
-
-        try:
-            data = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                raise ValueError("cache root must be an object")
-            return {
-                str(source_url): str(api_url)
-                for source_url, api_url in data.items()
-                if source_url and api_url
-            }
-        except (OSError, ValueError, TypeError) as error:
-            logger.warning(f"Не удалось загрузить кэш API URL: {error}")
-            return {}
-
-    def _save_cache(self) -> None:
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-        temp_path.write_text(
-            json.dumps(self._cache, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        temp_path.replace(self.cache_path)
+        """Convert a public URL through the shared SPFA resolver."""
+        return self._builder.convert_via_spfa(url)
