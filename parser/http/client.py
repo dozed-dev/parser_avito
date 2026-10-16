@@ -3,6 +3,7 @@
 """
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 
@@ -115,7 +116,17 @@ class HttpClient:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/150.0.0.0 Safari/537.36"
         )
-        is_mobile = " Mobile " in user_agent
+        is_mobile = "Mobile" in user_agent or "Android" in user_agent
+        chrome_match = re.search(r"(?:Chrome|Chromium)/(\d+)", user_agent)
+        chrome_version = chrome_match.group(1) if chrome_match else "150"
+        if "Android" in user_agent:
+            platform = "Android"
+        elif "Linux" in user_agent:
+            platform = "Linux"
+        elif "Mac OS X" in user_agent:
+            platform = "macOS"
+        else:
+            platform = "Windows"
         impersonate = fingerprint.get("impersonate") or "chrome"
         session = requests.Session(impersonate=impersonate)
         default_headers = {
@@ -124,9 +135,9 @@ class HttpClient:
             'cache-control': 'no-cache',
             'pragma': 'no-cache',
             "referer": "https://www.avito.ru/",
-            'sec-ch-ua': '"Not=A?Brand";v="99", "Google Chrome";v="149", "Chromium";v="149"',
+            'sec-ch-ua': f'"Not_A Brand";v="99", "Google Chrome";v="{chrome_version}", "Chromium";v="{chrome_version}"',
             'sec-ch-ua-mobile': '?1' if is_mobile else '?0',
-            'sec-ch-ua-platform': '"Android"' if is_mobile else '"Windows"',
+            'sec-ch-ua-platform': f'"{platform}"',
             'user-agent': user_agent,
         }
         headers = {**default_headers, **fingerprint_headers}
@@ -181,7 +192,7 @@ class HttpClient:
                     else self._client.request(method, url, timeout=self.timeout, **kwargs)
                 )
 
-                if self.cookies:
+                if self.cookies and not self._playwright:
                     self.cookies.update(response)
 
                 if response.status_code in (403, 429, 439):
