@@ -5,6 +5,7 @@ import asyncio
 import atexit
 import os
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -308,43 +309,9 @@ class AvitoMcpService:
             result["raw"] = payload
         return result
 
-    async def run_search(
-        self,
-        url: str | None,
-        query: str | None,
-        location: str,
-        category_id: int | None,
-        location_id: int | None,
-        price_min: int | None,
-        price_max: int | None,
-        sort: str,
-        page: int,
-        with_delivery_only: bool,
-    ) -> dict[str, Any]:
+    async def run_sync(self, function: Callable[..., Any], *args: Any) -> Any:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self._executor,
-            self.search,
-            url,
-            query,
-            location,
-            category_id,
-            location_id,
-            price_min,
-            price_max,
-            sort,
-            page,
-            with_delivery_only,
-        )
-
-    async def run_get_ad(self, item_id: int, include_raw: bool) -> dict[str, Any]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self._executor,
-            self.get_ad,
-            item_id,
-            include_raw,
-        )
+        return await loop.run_in_executor(self._executor, function, *args)
 
     def _close_sync(self) -> None:
         with self._lock:
@@ -387,7 +354,8 @@ async def search_ads(
     url: Annotated[str | None, "Legacy: готовая ссылка Avito; не смешивать с фильтрами."] = None,
 ) -> dict[str, Any]:
     """Search Avito with structured filters and return listings with image URLs."""
-    return await service.run_search(
+    return await service.run_sync(
+        service.search,
         url,
         query,
         location,
@@ -404,7 +372,7 @@ async def search_ads(
 @mcp.tool()
 async def get_ad(item_id: int, include_raw: bool = False) -> dict[str, Any]:
     """Get one Avito listing by numeric ID, including image URLs."""
-    return await service.run_get_ad(item_id, include_raw)
+    return await service.run_sync(service.get_ad, item_id, include_raw)
 
 
 def main() -> None:
