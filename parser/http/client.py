@@ -304,7 +304,7 @@ class HttpClient:
         response = self.request(
             "GET",
             self.ITEM_API_URL.format(item_id=item_id),
-            headers={} if self._playwright else self.ITEM_API_HEADERS.copy(),
+            headers=self.ITEM_API_HEADERS.copy(),
         )
         logger.info(f"Карточка {item_id}: HTTP {response.status_code}")
         payload = response.json()

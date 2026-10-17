@@ -56,6 +56,8 @@ Example client configuration:
 
 MCP always uses one persistent Playwright browser, started lazily by the first tool call. It does not use curl or perform a cookie handoff, regardless of the monitoring parser's `use_webdriver` and `playwright_handoff_to_curl` settings. Browser operations run on one worker thread; MCP shutdown closes the browser on that same thread. Search uses browser fetch on the Avito origin; card requests to the mobile API use a temporary tab in the same browser context, avoiding cross-origin fetch/CORS and preserving the search tab. HTML PoW challenges are executed by Chromium, not reimplemented in Python. Close any other Chromium process using the same profile before starting MCP.
 
+Card navigation retains the mobile API request headers, which select the `success.mobile` response format. A 200 response without valid card data is reported as a tool error rather than an empty successful listing.
+
 The browser uses `ru-RU`, `Europe/Moscow`, and native window dimensions (`no_viewport=True`). It omits `--enable-automation` and disables Blink's `AutomationControlled` feature; this makes `navigator.webdriver` false but does not guarantee that Avito accepts the browser. `AVITO_HEADLESS`, `AVITO_PROFILE_PATH`, and `AVITO_CHROMIUM_PATH` configure the browser; `proxy_string` selects its proxy. After Python changes, rebuild the Compose image with `podman compose build parser_avito`; `./run_chromium.sh` mounts the working tree and uses the updated launcher directly. Do not test both simultaneously against the same profile.
 
 The default Compose service uses streamable HTTP:

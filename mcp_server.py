@@ -201,9 +201,9 @@ class AvitoMcpService:
             raise ValueError("item_id должен быть положительным числом")
         payload = self._get_http().fetch_item_data(item_id)
         success = payload.get("success")
-        success = success if isinstance(success, dict) else {}
-        mobile = success.get("mobile")
-        mobile = mobile if isinstance(mobile, dict) else {}
+        mobile = success.get("mobile") if isinstance(success, dict) else None
+        if not isinstance(mobile, dict) or not mobile.get("title"):
+            raise ValueError(f"Avito не вернул данные объявления {item_id}")
         detail_url = _absolute_avito_url(
             mobile.get("urlPath") or mobile.get("url")
         )

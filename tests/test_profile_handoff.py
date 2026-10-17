@@ -40,6 +40,10 @@ def browser_site(monkeypatch):
                         if path.startswith("/api/1/card/items/")
                         else '{"catalog":{"items":[]}}'
                     )
+                    if path.startswith("/api/1/card/items/") and "Android" not in (
+                        route.request.header_value("user-agent") or ""
+                    ):
+                        body = '{"success":{"":null}}'
                     route.fulfill(status=200, content_type="application/json", body=body)
                 else:
                     route.fulfill(
