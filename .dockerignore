@@ -4,6 +4,7 @@ logs/*
 assets/*
 cookies.json
 state.json
+storage/
 venv
 __pycache__
 *.bak

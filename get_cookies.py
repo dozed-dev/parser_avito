@@ -9,6 +9,7 @@ from typing import Optional, Dict, List
 
 from dto import Proxy, ProxySplit
 from parser.cookies.base import CookiesProvider
+from parser.search_url_builder import AvitoSearchUrlBuilder, StructuredSearchRequest
 from playwright_setup import ensure_playwright_installed
 
 MAX_RETRIES = 3
@@ -296,6 +297,36 @@ def get_profile_cookies(
                 wait_until="domcontentloaded",
                 timeout=timeout * 1000,
             )
+            probe_url, _ = AvitoSearchUrlBuilder().build(StructuredSearchRequest())
+            probe_script = """async url => {
+                const response = await fetch(url, {
+                    credentials: 'include',
+                    headers: {accept: 'text/html'},
+                });
+                const contentType = response.headers.get('content-type') || '';
+                return {
+                    status: response.status,
+                    contentType,
+                    challenge: response.status === 439 && contentType.includes('text/html')
+                        ? await response.text() : null,
+                };
+            }"""
+            result = page.evaluate(probe_script, probe_url)
+            if result["challenge"]:
+                logger.info("Chromium выполняет PoW challenge Avito перед handoff в curl")
+                # Run Avito's challenge document on its original secure origin.
+                # Its script verifies the proof and reloads the current page.
+                with page.expect_navigation(wait_until="load", timeout=timeout * 1000):
+                    page.set_content(
+                        result["challenge"],
+                        wait_until="domcontentloaded",
+                        timeout=timeout * 1000,
+                    )
+                result = page.evaluate(probe_script, probe_url)
+            if result["status"] != 200 or "application/json" not in result["contentType"]:
+                raise RuntimeError(
+                    f"Не удалось подготовить сессию Avito для curl: HTTP {result['status']}"
+                )
             cookies = context.cookies("https://www.avito.ru")
             user_agent = page.evaluate("navigator.userAgent")
             return ProfileCookiesProvider(cookies, user_agent)
