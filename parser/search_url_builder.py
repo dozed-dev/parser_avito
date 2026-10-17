@@ -39,10 +39,14 @@ class StructuredSearchRequest:
     sort: str = "relevance"
     page: int = 1
     with_delivery_only: bool = False
+    category_id: int | None = None
+    category_params: dict[str, int | str] | None = None
 
     def filters(self, resolved_location_id: int) -> dict[str, object]:
         return {
             "query": self.query.strip() if self.query else None,
+            "category_id": self.category_id,
+            "category_params": self.category_params,
             "location": self.location,
             "location_id": resolved_location_id,
             "price_min": self.price_min,
@@ -193,6 +197,13 @@ class AvitoSearchUrlBuilder:
             ("sort", SORT_VALUES[request.sort]),
             ("page", request.page),
         ]
+        if request.category_id is not None:
+            params.append(("categoryId", request.category_id))
+        if request.category_params:
+            params.extend(
+                (f"params[{key}]", value)
+                for key, value in request.category_params.items()
+            )
         if request.query and request.query.strip():
             params.append(("query", request.query.strip()))
         if request.price_min is not None:
@@ -299,6 +310,10 @@ class AvitoSearchUrlBuilder:
 
     @staticmethod
     def _validate(request: StructuredSearchRequest) -> None:
+        if request.category_id is not None and request.category_id <= 0:
+            raise ValueError("category_id должен быть положительным ID категории Avito")
+        if request.category_params and request.category_id is None:
+            raise ValueError("category_params можно передавать только вместе с category_id")
         if request.page < 1 or request.page > 100:
             raise ValueError("page должен быть от 1 до 100")
         if request.sort not in SORT_VALUES:

@@ -47,6 +47,8 @@ def test_builds_structured_search_url_for_local_location(tmp_path):
     assert params["page"] == "2"
     assert params["cd"] == "1"
     assert filters["location_id"] == 653240
+    assert "categoryId" not in params
+    assert not any(key.startswith("params[") for key in params)
 
 
 def test_resolves_existing_unknown_location_through_spfa(tmp_path, monkeypatch):
@@ -113,3 +115,28 @@ def test_builds_supported_public_url_without_duplicate_logic(tmp_path):
 
     assert _query(url)["locationId"] == "653240"
     assert _query(url)["query"] == "iphone"
+
+
+def test_builds_exact_category_and_subcategory_params(tmp_path):
+    url, _ = AvitoSearchUrlBuilder(cache_path=tmp_path / "cache.json").build(
+        StructuredSearchRequest(
+            query="iphone 16",
+            category_id=84,
+            category_params={"110680": 458500, "110618": "469735"},
+        )
+    )
+
+    params = _query(url)
+    assert params["categoryId"] == "84"
+    assert params["params[110680]"] == "458500"
+    assert params["params[110618]"] == "469735"
+    assert params["query"] == "iphone 16"
+
+
+@pytest.mark.parametrize("search_request, message", [
+    (StructuredSearchRequest(category_id=0), "category_id"),
+    (StructuredSearchRequest(category_params={"110680": 458500}), "category_params"),
+])
+def test_rejects_invalid_category_selection(tmp_path, search_request, message):
+    with pytest.raises(ValueError, match=message):
+        AvitoSearchUrlBuilder(cache_path=tmp_path / "cache.json").build(search_request)

@@ -25,17 +25,27 @@ podman compose up -d --build --remove-orphans
 To start only MCP without the tunnel:
 
 ```bash
-CONTROL_PLANE_API_KEY=unused CONTROL_PLANE_TUNNEL_ID=unused \
-  podman compose up -d --build --no-deps parser_avito
+podman compose up -d --build --no-deps parser_avito
 ```
 
-The dummy variables only satisfy Compose interpolation for the unused tunnel service; tunnel-client is not started. To run the monitoring parser instead, stop MCP first and use `podman compose run --rm --no-deps -e APP_MODE=parser parser_avito`. Do not run both against the same Chromium profile concurrently.
+The real tunnel variables must still be available for Compose configuration validation. Do not substitute dummy credentials on an existing stack: podman-compose can recreate dependent services despite `--no-deps`, especially with `--force-recreate`. To run the monitoring parser instead, stop MCP first and use `podman compose run --rm --no-deps -e APP_MODE=parser parser_avito`. Do not run both against the same Chromium profile concurrently.
 
-- `search_ads(query, location, location_id, price_min, price_max, sort, page, with_delivery_only)` - build a search locally and return listings with image URLs;
+- `search_ads(query, category_id, category_params, location, location_id, price_min, price_max, sort, page, with_delivery_only)` - build a search locally and return listings, `resolved_search`, and `category_options`;
 - `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs;
 - `search_ads(url=..., page=...)` remains available for direct API URLs, cached URLs, and simple `/rossiya`, `/moskva`, or `/sankt-peterburg` links.
 
-Structured search defaults to `Россия`. `location` must be the exact full Russian city or region name: the local list contains `Россия`, `Москва`, and `Санкт-Петербург`; aliases such as `СПб` are not supported. Other full names are transliterated using Avito-style slugs (`Нижний Новгород` -> `nizhniy_novgorod`, `Свердловская область` -> `sverdlovskaya_oblast`) and resolved through SPFA, then cached. If the city or region cannot be resolved, the tool returns `Город или регион не найден ... Возможно, в названии опечатка?`. Use `location_id` to skip resolution when the Avito ID is known. `sort` accepts `relevance`, `newest`, `price_asc`, and `price_desc`. `page` is limited to 1..100. Categories are not exposed yet. The server does not add, edit, or delete parser configuration and has no monitoring tools.
+Structured search defaults to `Россия`. `location` must be the exact full Russian city or region name: the local list contains `Россия`, `Москва`, and `Санкт-Петербург`; aliases such as `СПб` are not supported. Other full names are transliterated using Avito-style slugs (`Нижний Новгород` -> `nizhniy_novgorod`, `Свердловская область` -> `sverdlovskaya_oblast`) and resolved through SPFA, then cached. If the city or region cannot be resolved, the tool returns `Город или регион не найден ... Возможно, в названии опечатка?`. Use `location_id` to skip resolution when the Avito ID is known. `sort` accepts `relevance`, `newest`, `price_asc`, and `price_desc`. `page` is limited to 1..100. The server does not add, edit, or delete parser configuration and has no monitoring tools.
+
+### Category workflow
+
+Make the first search without `category_id` or `category_params`, even when a category seems obvious. Avito automatically interprets the query; MCP does not classify or rank categories itself.
+
+- `category_options` contains Avito's navigation options: exact positive `category_id`, `name`, `category_params`, `selected`, and a reference `url`. Duplicate options with identical IDs and parameters are merged; UI node IDs are not exposed as category IDs.
+- To refine the search, copy the chosen option's `category_id` and `category_params` into the next call. Category names and guessed IDs are not accepted. Parameters are necessary because multiple subcategories can share one category ID.
+- `resolved_search` reports Avito's effective `query`, `category_id`, and `category_params`; `filters` still describes the requested filters. Avito can replace query text with product parameters, so these can differ.
+
+Categories are extracted from the same API response as the listings, without an extra classification request. Options are navigation choices, not relevance probabilities. If Avito omits category metadata, `resolved_search` is null and `category_options` is empty; no categories are invented.
+
 
 ## MCP client command
 

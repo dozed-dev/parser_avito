@@ -8,7 +8,8 @@
 - `search_ads` принимает structured filters (`query`, location, price, sort, page, delivery) и локально строит API URL без SPFA для базовых запросов.
 - В structured MCP search добавлена canonical location `Санкт-Петербург` (`locationId=653240`); короткие aliases не поддерживаются.
 - Старый SPFA converter вынесен в `convert_via_spfa`; обычный parser продолжает использовать его явно.
-- Structured search и локальный public URL converter теперь используют общий `parser/search_url_builder.py`; категории пока не поддерживаются, неизвестные locations резолвятся через SPFA и кэшируются.
+- Structured search и локальный public URL converter теперь используют общий `parser/search_url_builder.py`; неизвестные locations резолвятся через SPFA и кэшируются.
+- `search_ads` принимает точный `category_id` и `category_params`, возвращает `resolved_search` и варианты `category_options` из ответа Avito. В описании инструмента указан первый поиск без категории и последующий выбор только из полученных вариантов.
 
 #### Исправлено
 - Compose запускает MCP в единственном контейнере `avito` с профилем Chromium и Wayland/X11; дублирующий `avito_mcp` удалён, tunnel-client зависит от `parser_avito`.
