@@ -6,6 +6,8 @@ import pytest
 from playwright.sync_api import BrowserType
 
 from get_cookies import get_profile_cookies
+from parser.http.client import HttpClient
+from parser.proxies.proxy import NoProxy
 
 
 @pytest.fixture
@@ -19,7 +21,7 @@ def browser_site(monkeypatch):
 
     launch = BrowserType.launch_persistent_context
 
-    def install(api_status=439):
+    def install(api_status=439, spa_navigation=False):
         def handle(route):
             path = urlsplit(route.request.url).path
             if path == "/":
@@ -38,12 +40,19 @@ def browser_site(monkeypatch):
                     route.fulfill(
                         status=api_status,
                         content_type="text/html",
-                        body="""<!doctype html><script>
+                        body=(
+                            "<!doctype html>"
+                            + (
+                                "<script>history.pushState({}, '', location.pathname);</script>"
+                                if spa_navigation else ""
+                            )
+                            + """<script>
                             document.addEventListener('DOMContentLoaded', async () => {
                                 await fetch('/verify', {method: 'POST'});
                                 location.reload();
                             });
-                        </script>""",
+                        </script>"""
+                        ),
                     )
             else:
                 route.abort()
@@ -71,3 +80,23 @@ def test_handoff_does_not_export_an_api_blocked_session(tmp_path, browser_site):
 
     with pytest.raises(RuntimeError, match="HTTP 403"):
         get_profile_cookies(profile_path=str(tmp_path), headless=True)
+
+
+def test_playwright_request_completes_challenge_without_consuming_retry_budget(
+    tmp_path, browser_site, monkeypatch
+):
+    browser_site(spa_navigation=True)
+    monkeypatch.setenv("AVITO_PROFILE_PATH", str(tmp_path))
+    monkeypatch.setenv("AVITO_HEADLESS", "1")
+    client = HttpClient(
+        proxy=NoProxy(), use_playwright=True, max_retries=1, retry_delay=0
+    )
+    try:
+        response = client.request(
+            "GET", "https://www.avito.ru/web/1/js/items?query=ffbeast"
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"catalog": {"items": []}}
+    finally:
+        client.close()

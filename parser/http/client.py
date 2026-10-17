@@ -193,13 +193,28 @@ class HttpClient:
 
     def _request_playwright(self, method: str, url: str, **kwargs):
         headers = kwargs.get("headers") or {}
-        result = self._page.evaluate(
-            """async ({method, url, headers}) => {
-                const response = await fetch(url, {method, headers, credentials: 'include'});
-                return {status: response.status, headers: Object.fromEntries(response.headers.entries()), text: await response.text()};
-            }""",
-            {"method": method, "url": url, "headers": headers},
-        )
+        fetch_script = """async ({method, url, headers}) => {
+            const response = await fetch(url, {method, headers, credentials: 'include'});
+            return {status: response.status, headers: Object.fromEntries(response.headers.entries()), text: await response.text()};
+        }"""
+        arguments = {"method": method, "url": url, "headers": headers}
+        result = self._page.evaluate(fetch_script, arguments)
+        if result["status"] == 439 and "text/html" in result["headers"].get("content-type", ""):
+            logger.info("Playwright выполняет PoW challenge Avito")
+            time_origin = self._page.evaluate("performance.timeOrigin")
+            self._page.set_content(
+                result["text"],
+                wait_until="domcontentloaded",
+                timeout=self.timeout * 1000,
+            )
+            # SPA history events can precede verification; wait for a new document.
+            self._page.wait_for_function(
+                "previous => performance.timeOrigin !== previous",
+                arg=time_origin,
+                timeout=self.timeout * 1000,
+            )
+            self._page.wait_for_load_state("load", timeout=self.timeout * 1000)
+            result = self._page.evaluate(fetch_script, arguments)
         return _PlaywrightResponse(result["status"], result["text"], result["headers"])
 
     def request(self, method: str, url: str, **kwargs):
