@@ -7,7 +7,7 @@ The project includes a read-only MCP server with stdio and streamable HTTP trans
 Run it from the project directory:
 
 ```bash
-podman compose run --rm -T -e APP_MODE=mcp parser_avito
+podman compose run --rm -T --no-deps -e MCP_TRANSPORT=stdio parser_avito
 ```
 
 ## ChatGPT tunnel via Compose
@@ -17,10 +17,12 @@ Set the tunnel credentials in the shell or `.env` file:
 ```bash
 export CONTROL_PLANE_API_KEY=sk-...
 export CONTROL_PLANE_TUNNEL_ID=tunnel_...
-podman compose up -d --build parser_avito mcp_server tunnel-client
+podman compose up -d --build --remove-orphans
 ```
 
-`mcp_server` listens on `127.0.0.1:8000/mcp`, and `tunnel-client` forwards that endpoint to the configured OpenAI tunnel. The compose file passes `CONTROL_PLANE_API_KEY`, `CONTROL_PLANE_TUNNEL_ID`, and `MCP_SERVER_URL` to the tunnel client.
+`parser_avito` (container `avito`) runs MCP on `127.0.0.1:8000/mcp`, preserving the Chromium profile and Wayland/X11 mounts. There is no separate `avito_mcp` container and no background monitoring parser. `tunnel-client` forwards the MCP endpoint to the configured OpenAI tunnel using `CONTROL_PLANE_API_KEY`, `CONTROL_PLANE_TUNNEL_ID`, and `MCP_SERVER_URL`.
+
+To start only MCP without the tunnel, run `podman compose up -d parser_avito` (the required tunnel variables must still be set for Compose configuration validation). To run the monitoring parser instead, stop MCP first and use `podman compose run --rm --no-deps -e APP_MODE=parser parser_avito`. Do not run both against the same Chromium profile concurrently.
 
 - `search_ads(query, location, location_id, price_min, price_max, sort, page, with_delivery_only)` - build a search locally and return listings with image URLs;
 - `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs;
@@ -38,7 +40,7 @@ Example client configuration:
     "avito": {
       "command": "podman",
       "args": [
-        "compose", "run", "--rm", "-T", "-e", "APP_MODE=mcp", "parser_avito"
+        "compose", "run", "--rm", "-T", "--no-deps", "-e", "MCP_TRANSPORT=stdio", "parser_avito"
       ]
     }
   }
@@ -47,15 +49,10 @@ Example client configuration:
 
 MCP always performs the Playwright profile -> curl handoff before the first tool call. Close any other Chromium process using the same profile before starting MCP.
 
-The same tools are available over streamable HTTP:
+The default Compose service uses streamable HTTP:
 
 ```bash
-podman compose run --rm \
-  -e APP_MODE=mcp \
-  -e MCP_TRANSPORT=streamable-http \
-  -e MCP_HOST=0.0.0.0 \
-  -e MCP_PORT=8000 \
-  parser_avito
+podman compose up -d parser_avito
 ```
 
 The MCP endpoint is `http://127.0.0.1:8000/mcp`. The default port is `8000`; change it with `MCP_PORT`.

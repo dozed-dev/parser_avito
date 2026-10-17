@@ -29,6 +29,8 @@ make clean    # удалить контейнер и Docker-образ
 
 ### Запуск через docker-compose
 
+Текущий Compose запускает MCP в контейнере `avito` и tunnel-client, а не фоновый мониторинг объявлений. Перед запуском задайте переменные туннеля; команды для MCP, stdio и отдельного запуска мониторинга описаны в [MCP.md](MCP.md).
+
 ```bash
 touch database.db
 docker-compose up -d
