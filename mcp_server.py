@@ -2,17 +2,16 @@
 
 
 import asyncio
-import atexit
 import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from mcp.server.fastmcp import FastMCP
 
-from get_cookies import get_profile_cookies
 from load_config import load_avito_config
 from parser.http.client import HttpClient
 from parser.proxies.proxy_factory import build_proxy
@@ -23,7 +22,15 @@ from parser.url_converter import AvitoUrlConverter
 MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
 
-mcp = FastMCP("Avito read-only", host=MCP_HOST, port=MCP_PORT)
+@asynccontextmanager
+async def _lifespan(_server: FastMCP):
+    try:
+        yield {}
+    finally:
+        service.close()
+
+
+mcp = FastMCP("Avito read-only", host=MCP_HOST, port=MCP_PORT, lifespan=_lifespan)
 
 
 def _api_url_for_page(api_url: str, page: int) -> str:
@@ -120,19 +127,13 @@ class AvitoMcpService:
                 return self._http
 
             proxy = build_proxy(self._config)
-            cookies = get_profile_cookies(
-                timeout=self._config.timeout,
-                proxy=proxy,
-            )
-            use_playwright = False
             self._http = HttpClient(
                 proxy=proxy,
-                cookies=cookies,
                 timeout=self._config.timeout,
                 max_retries=self._config.max_count_of_retry,
                 retry_delay=self._config.retry_delay,
                 block_threshold=self._config.block_threshold,
-                use_playwright=use_playwright,
+                use_playwright=True,
             )
             return self._http
 
@@ -235,15 +236,11 @@ class AvitoMcpService:
             return
         try:
             executor.submit(self._close_sync).result(timeout=30)
-        except RuntimeError:
-            # Python may already be shutting down the executor at atexit.
-            pass
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
 
 
 service = AvitoMcpService()
-atexit.register(service.close)
 
 
 @mcp.tool()

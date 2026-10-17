@@ -6,6 +6,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from curl_cffi import requests
 from loguru import logger
@@ -119,6 +120,9 @@ class HttpClient:
         }
         if os.path.exists(executable):
             options["executable_path"] = executable
+        proxy_url = self.proxy.get_httpx_proxy()
+        if proxy_url:
+            options["proxy"] = {"server": proxy_url}
         self._context = self._playwright.chromium.launch_persistent_context(profile, **options)
         self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
         self._page.goto("https://www.avito.ru", wait_until="domcontentloaded", timeout=self.timeout * 1000)
@@ -193,6 +197,8 @@ class HttpClient:
 
     def _request_playwright(self, method: str, url: str, **kwargs):
         headers = kwargs.get("headers") or {}
+        if method.upper() == "GET" and urlsplit(url)[:2] != urlsplit(self._page.url)[:2]:
+            return self._navigate_playwright(url, headers)
         fetch_script = """async ({method, url, headers}) => {
             const response = await fetch(url, {method, headers, credentials: 'include'});
             return {status: response.status, headers: Object.fromEntries(response.headers.entries()), text: await response.text()};
@@ -216,6 +222,37 @@ class HttpClient:
             self._page.wait_for_load_state("load", timeout=self.timeout * 1000)
             result = self._page.evaluate(fetch_script, arguments)
         return _PlaywrightResponse(result["status"], result["text"], result["headers"])
+
+    def _navigate_playwright(self, url: str, headers: dict) -> _PlaywrightResponse:
+        page = self._context.new_page()
+        documents = []
+
+        def is_document(response):
+            return (
+                response.request.is_navigation_request()
+                and response.request.frame == page.main_frame
+                and not 300 <= response.status < 400
+            )
+
+        page.on("response", lambda response: documents.append(response) if is_document(response) else None)
+        try:
+            page.set_extra_http_headers(headers)
+            response = page.goto(
+                url, wait_until="domcontentloaded", timeout=self.timeout * 1000
+            )
+            if response.status == 439 and "text/html" in response.headers.get("content-type", ""):
+                logger.info("Playwright выполняет PoW challenge Avito в отдельной вкладке")
+                response = documents[-1]
+                if response.status == 439:
+                    response = page.wait_for_event(
+                        "response",
+                        predicate=lambda event: is_document(event) and event.status != 439,
+                        timeout=self.timeout * 1000,
+                    )
+                page.wait_for_load_state("load", timeout=self.timeout * 1000)
+            return _PlaywrightResponse(response.status, response.text(), response.headers)
+        finally:
+            page.close()
 
     def request(self, method: str, url: str, **kwargs):
         last_exc = None
@@ -267,7 +304,7 @@ class HttpClient:
         response = self.request(
             "GET",
             self.ITEM_API_URL.format(item_id=item_id),
-            headers=self.ITEM_API_HEADERS.copy(),
+            headers={} if self._playwright else self.ITEM_API_HEADERS.copy(),
         )
         logger.info(f"Карточка {item_id}: HTTP {response.status_code}")
         payload = response.json()

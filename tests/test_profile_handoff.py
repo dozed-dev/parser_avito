@@ -33,9 +33,14 @@ def browser_site(monkeypatch):
                     headers={"set-cookie": "session_ready=1; Path=/; Secure; HttpOnly"},
                     body='{"verified": true}',
                 )
-            elif path == "/web/1/js/items":
+            elif path in ("/web/1/js/items", "/api/1/card/items/123"):
                 if "session_ready=1" in (route.request.header_value("cookie") or ""):
-                    route.fulfill(status=200, content_type="application/json", body='{"catalog":{"items":[]}}')
+                    body = (
+                        '{"success":{"mobile":{"title":"Wheel","description":"Full description"}}}'
+                        if path.startswith("/api/1/card/items/")
+                        else '{"catalog":{"items":[]}}'
+                    )
+                    route.fulfill(status=200, content_type="application/json", body=body)
                 else:
                     route.fulfill(
                         status=api_status,
@@ -97,6 +102,28 @@ def test_playwright_request_completes_challenge_without_consuming_retry_budget(
         )
 
         assert response.status_code == 200
+        assert response.json() == {"catalog": {"items": []}}
+    finally:
+        client.close()
+
+
+def test_playwright_card_challenge_preserves_search_origin_and_closes_card_tab(
+    tmp_path, browser_site, monkeypatch
+):
+    browser_site()
+    monkeypatch.setenv("AVITO_PROFILE_PATH", str(tmp_path))
+    monkeypatch.setenv("AVITO_HEADLESS", "1")
+    client = HttpClient(
+        proxy=NoProxy(), use_playwright=True, max_retries=1, retry_delay=0
+    )
+    try:
+        payload = client.fetch_item_data(123)
+        assert payload["success"]["mobile"]["description"] == "Full description"
+        assert len(client._context.pages) == 1
+
+        response = client.request(
+            "GET", "https://www.avito.ru/web/1/js/items?query=ffbeast"
+        )
         assert response.json() == {"catalog": {"items": []}}
     finally:
         client.close()

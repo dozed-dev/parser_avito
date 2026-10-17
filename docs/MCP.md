@@ -22,7 +22,14 @@ podman compose up -d --build --remove-orphans
 
 `parser_avito` (container `avito`) runs MCP on `127.0.0.1:8000/mcp`, preserving the Chromium profile and Wayland/X11 mounts. There is no separate `avito_mcp` container and no background monitoring parser. `tunnel-client` forwards the MCP endpoint to the configured OpenAI tunnel using `CONTROL_PLANE_API_KEY`, `CONTROL_PLANE_TUNNEL_ID`, and `MCP_SERVER_URL`.
 
-To start only MCP without the tunnel, run `podman compose up -d parser_avito` (the required tunnel variables must still be set for Compose configuration validation). To run the monitoring parser instead, stop MCP first and use `podman compose run --rm --no-deps -e APP_MODE=parser parser_avito`. Do not run both against the same Chromium profile concurrently.
+To start only MCP without the tunnel:
+
+```bash
+CONTROL_PLANE_API_KEY=unused CONTROL_PLANE_TUNNEL_ID=unused \
+  podman compose up -d --build --no-deps parser_avito
+```
+
+The dummy variables only satisfy Compose interpolation for the unused tunnel service; tunnel-client is not started. To run the monitoring parser instead, stop MCP first and use `podman compose run --rm --no-deps -e APP_MODE=parser parser_avito`. Do not run both against the same Chromium profile concurrently.
 
 - `search_ads(query, location, location_id, price_min, price_max, sort, page, with_delivery_only)` - build a search locally and return listings with image URLs;
 - `get_ad(item_id, include_raw=false)` - load one listing by numeric ID and return details with image URLs;
@@ -47,9 +54,9 @@ Example client configuration:
 }
 ```
 
-MCP always performs the Playwright profile -> curl handoff before the first tool call. Before exporting cookies, Chromium checks the catalog API. If it receives an HTTP 439 HTML PoW challenge, it executes Avito's own challenge document on the Avito origin, waits for the page reload, and requires a successful JSON API response before handing the session to curl. The proof algorithm is not reimplemented in Python. HTTP 403/429 or an unsuccessful challenge abort the handoff rather than returning an unverified session. Close any other Chromium process using the same profile before starting MCP.
+MCP always uses one persistent Playwright browser, started lazily by the first tool call. It does not use curl or perform a cookie handoff, regardless of the monitoring parser's `use_webdriver` and `playwright_handoff_to_curl` settings. Browser operations run on one worker thread; MCP shutdown closes the browser on that same thread. Search uses browser fetch on the Avito origin; card requests to the mobile API use a temporary tab in the same browser context, avoiding cross-origin fetch/CORS and preserving the search tab. HTML PoW challenges are executed by Chromium, not reimplemented in Python. Close any other Chromium process using the same profile before starting MCP.
 
-The manual Chromium launcher, parser Playwright client, and MCP handoff use `ru-RU`, `Europe/Moscow`, and native window dimensions (`no_viewport=True`). They omit `--enable-automation` and disable Blink's `AutomationControlled` feature; this makes `navigator.webdriver` false but does not guarantee that Avito accepts the browser. The curl handoff keeps the Russian language and selects `chrome<major>` impersonation from the browser User-Agent; the installed curl_cffi must support that Chrome version. After Python changes, rebuild the Compose image with `podman compose build parser_avito`; `./run_chromium.sh` mounts the working tree and uses the updated launcher directly. Do not test both simultaneously against the same profile.
+The browser uses `ru-RU`, `Europe/Moscow`, and native window dimensions (`no_viewport=True`). It omits `--enable-automation` and disables Blink's `AutomationControlled` feature; this makes `navigator.webdriver` false but does not guarantee that Avito accepts the browser. `AVITO_HEADLESS`, `AVITO_PROFILE_PATH`, and `AVITO_CHROMIUM_PATH` configure the browser; `proxy_string` selects its proxy. After Python changes, rebuild the Compose image with `podman compose build parser_avito`; `./run_chromium.sh` mounts the working tree and uses the updated launcher directly. Do not test both simultaneously against the same profile.
 
 The default Compose service uses streamable HTTP:
 
