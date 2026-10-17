@@ -6,13 +6,18 @@ with sync_playwright() as playwright:
         "/app/storage/container-chromium-profile",
         headless=False,
         executable_path="/ms-playwright/chromium-1169/chrome-linux/chrome",
-        viewport=None,
+        no_viewport=True,
+        locale="ru-RU",
+        timezone_id="Europe/Moscow",
+        ignore_default_args=["--enable-automation"],
         args=[
             "--no-sandbox",
             "--disable-breakpad",
             "--disable-crash-reporter",
             "--crash-dumps-dir=/tmp",
             "--ozone-platform=wayland",
+            "--disable-blink-features=AutomationControlled",
+            "--lang=ru-RU",
         ],
     )
     page = context.pages[0] if context.pages else context.new_page()

@@ -103,13 +103,18 @@ class HttpClient:
         headless = os.getenv("AVITO_HEADLESS", "1").lower() not in {"0", "false", "no"}
         options = {
             "headless": headless,
-            "viewport": None,
+            "no_viewport": True,
+            "locale": "ru-RU",
+            "timezone_id": "Europe/Moscow",
+            "ignore_default_args": ["--enable-automation"],
             "args": [
                 "--no-sandbox",
                 "--disable-breakpad",
                 "--disable-crash-reporter",
                 "--crash-dumps-dir=/tmp",
                 "--ozone-platform=wayland",
+                "--disable-blink-features=AutomationControlled",
+                "--lang=ru-RU",
             ],
         }
         if os.path.exists(executable):

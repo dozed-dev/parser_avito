@@ -233,9 +233,13 @@ class ProfileCookiesProvider(CookiesProvider):
         return self._user_agent
 
     def get_fingerprint(self) -> dict:
+        chrome_version = self._user_agent.split("Chrome/", 1)[1].split(".", 1)[0]
         return {
-            "impersonate": "chrome",
-            "headers": {"user-agent": self._user_agent},
+            "impersonate": f"chrome{chrome_version}",
+            "headers": {
+                "user-agent": self._user_agent,
+                "accept-language": "ru-RU",
+            },
         }
 
     def handle_block(self):
@@ -262,13 +266,18 @@ def get_profile_cookies(
     )
     options = {
         "headless": headless,
-        "viewport": None,
+        "no_viewport": True,
+        "locale": "ru-RU",
+        "timezone_id": "Europe/Moscow",
+        "ignore_default_args": ["--enable-automation"],
         "args": [
             "--no-sandbox",
             "--disable-breakpad",
             "--disable-crash-reporter",
             "--crash-dumps-dir=/tmp",
             "--ozone-platform=wayland",
+            "--disable-blink-features=AutomationControlled",
+            "--lang=ru-RU",
         ],
     }
     if os.path.exists(executable):

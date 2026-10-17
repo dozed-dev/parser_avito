@@ -49,6 +49,8 @@ Example client configuration:
 
 MCP always performs the Playwright profile -> curl handoff before the first tool call. Close any other Chromium process using the same profile before starting MCP.
 
+The manual Chromium launcher, parser Playwright client, and MCP handoff use `ru-RU`, `Europe/Moscow`, and native window dimensions (`no_viewport=True`). They omit `--enable-automation` and disable Blink's `AutomationControlled` feature; this makes `navigator.webdriver` false but does not guarantee that Avito accepts the browser. The curl handoff keeps the Russian language and selects `chrome<major>` impersonation from the browser User-Agent; the installed curl_cffi must support that Chrome version. After Python changes, rebuild the Compose image with `podman compose build parser_avito`; `./run_chromium.sh` mounts the working tree and uses the updated launcher directly. Do not test both simultaneously against the same profile.
+
 The default Compose service uses streamable HTTP:
 
 ```bash

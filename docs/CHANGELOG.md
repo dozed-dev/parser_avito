@@ -12,6 +12,8 @@
 
 #### Исправлено
 - Compose запускает MCP в единственном контейнере `avito` с профилем Chromium и Wayland/X11; дублирующий `avito_mcp` удалён, tunnel-client зависит от `parser_avito`.
+- Лаунчер Chromium, Playwright-клиент парсера и MCP handoff используют `ru-RU`, `Europe/Moscow` и реальные размеры окна; отключены `--enable-automation` и Blink AutomationControlled.
+- При handoff в curl сохраняется русский язык, а версия Chrome impersonation выбирается по User-Agent браузера вместо плавающего профиля `chrome`.
 
 ### [3.2.23] - 2026-09-30
 #### Добавлено
